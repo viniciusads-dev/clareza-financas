@@ -47,6 +47,8 @@ Os valores transitam na API como **centavos inteiros**. Uma compra de R$ 100,00 
 ## Segurança implementada
 
 - Identidade obtida no servidor pelo cabeçalho `oai-authenticated-user-id`, injetado pelo gateway autenticado da hospedagem privada.
+- A API também aceita **Personal Access Tokens** pelo cabeçalho `Authorization: Bearer clrz_...`. Cada token pertence a um único usuário, tem escopos `finance:read` e/ou `finance:write`, pode expirar em até 365 dias e pode ser revogado imediatamente.
+- Tokens são criados ou revogados apenas por uma sessão autenticada em `POST`/`DELETE /api/auth/tokens`; o valor completo é devolvido só na criação. O banco guarda somente SHA-256 do token, seu prefixo e metadados — nunca o segredo recuperável.
 - Não exponha diretamente este Worker em outra infraestrutura confiando em cabeçalhos enviados pelo navegador. Fora desse gateway, é necessário substituir a integração por autenticação verificada no servidor.
 - Leituras e mutações sempre usam o proprietário autenticado, inclusive verificações de referências entre contas e lançamentos.
 - API rejeita acessos sem identidade, escrita de outra origem, tipos inválidos, centavos fracionários, datas impossíveis e payloads maiores que 16 KB.
@@ -56,6 +58,31 @@ Os valores transitam na API como **centavos inteiros**. Uma compra de R$ 100,00 
 - Sem credenciais bancárias ou segredos no frontend.
 
 Os testes automatizados cobrem cálculos e regras de API, não constituem uma auditoria de segurança completa. Contas/cartões são cadastros manuais: não há Open Finance, conciliação bancária automática, notificações externas, geração recorrente de contas ou cálculo de juros/rendimentos nesta versão.
+
+## Acesso à aplicação e API
+
+A entrada pelo navegador continua sendo feita pelo login privado da plataforma, que identifica o usuário e mantém suas finanças isoladas. O Bearer token é voltado a integrações, automações ou um cliente externo; ele não deve ser colocado em código do frontend, planilhas compartilhadas ou repositórios.
+
+| Operação | Autenticação | Escopo necessário |
+| --- | --- | --- |
+| `GET /api/state` | Sessão ou Bearer | `finance:read` |
+| `POST`, `PUT`, `DELETE /api/{accounts,transactions,budgets,goals}` | Sessão ou Bearer | `finance:write` |
+| `GET /api/auth/tokens` | Sessão do navegador | — |
+| `POST /api/auth/tokens` | Sessão do navegador | — |
+| `DELETE /api/auth/tokens/{id}` | Sessão do navegador | — |
+
+Exemplo de chamada feita por um processo seguro no seu computador/servidor:
+
+```bash
+curl https://clareza-financas.vinidedeco1.chatgpt.site/api/state \
+  -H 'Authorization: Bearer clrz_SEU_TOKEN_AQUI'
+```
+
+Não há CORS liberado para origens externas. Chamadas Bearer feitas por servidor funcionam sem `Origin`; uma escrita enviada por um navegador de outra origem é bloqueada. A emissão de tokens já está disponível pela API para a sessão autenticada; uma tela visual de gestão de tokens entra como primeira melhoria de produto no planejamento abaixo.
+
+## Próximas melhorias
+
+O plano priorizado, incluindo o bloqueio visual de investimentos enquanto houver dívidas, está em [docs/roadmap.md](docs/roadmap.md).
 
 ## Desenvolvimento e verificação
 
