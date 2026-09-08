@@ -1,0 +1,1 @@
+API TypeScript em `src/index.ts`, com contrato Fetch e binding D1. Independente do React/Vinext. A implantação inicial compartilha o adaptador Worker com o frontend; veja o README principal para o limite de confiança da identidade e as regras de segurança.
