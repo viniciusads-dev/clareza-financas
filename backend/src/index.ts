@@ -2,7 +2,10 @@ import { z } from "zod";
 import {
   addMonths,
   cardDue,
+  nextRecurrenceDate,
   splitAmount,
+  today,
+  type Recurrence,
   type State,
   type Transaction,
 } from "../../shared/finance";
@@ -48,6 +51,8 @@ const schemas = {
       toId: id.optional(),
       date,
       status: z.enum(["paid", "pending"]),
+      subcategory: name.optional(),
+      tags: z.array(id).max(8).optional(),
       invoiceMonth: z
         .string()
         .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
@@ -63,6 +68,31 @@ const schemas = {
     })
     .strict(),
   goals: z.object({ name, target: amount, saved: cents, date, color }).strict(),
+  recurrences: z
+    .object({
+      title: name,
+      amount,
+      type: z.enum(["expense", "income"]),
+      category: name,
+      subcategory: name.optional(),
+      tags: z.array(id).max(8).optional(),
+      accountId: id,
+      startDate: date,
+      nextDate: date,
+      frequency: z.enum(["weekly", "monthly", "yearly"]),
+      endDate: date.optional(),
+      active: z.boolean(),
+    })
+    .strict(),
+  categories: z
+    .object({
+      name,
+      type: z.enum(["expense", "income"]),
+      parentId: id.optional(),
+      color,
+    })
+    .strict(),
+  tags: z.object({ name, color }).strict(),
 };
 class HttpError extends Error {
   constructor(
@@ -100,6 +130,9 @@ export async function readState(db: D1Database, owner: string): Promise<State> {
     transactions: [],
     budgets: [],
     goals: [],
+    recurrences: [],
+    categories: [],
+    tags: [],
   };
   for (const r of results) {
     if (r.kind in state)
@@ -119,6 +152,68 @@ function insert(
       "INSERT INTO finance_records (id, owner, kind, data, created) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(recordId, owner, kind, JSON.stringify(data), Date.now());
+}
+async function syncRecurrences(db: D1Database, owner: string) {
+  const { results } = await db
+    .prepare(
+      "SELECT id, data FROM finance_records WHERE owner = ? AND kind = 'recurrences' ORDER BY created, id",
+    )
+    .bind(owner)
+    .all<{ id: string; data: string }>();
+  const cutoff = today();
+  const statements: D1PreparedStatement[] = [];
+  for (const row of results) {
+    let recurrence: Omit<Recurrence, "id">;
+    try {
+      recurrence = JSON.parse(row.data) as Omit<Recurrence, "id">;
+    } catch {
+      continue;
+    }
+    if (!recurrence.active || recurrence.nextDate > cutoff) continue;
+    let nextDate = recurrence.nextDate;
+    let generated = 0;
+    while (
+      nextDate <= cutoff &&
+      generated < 120 &&
+      (!recurrence.endDate || nextDate <= recurrence.endDate)
+    ) {
+      statements.push(
+        insert(db, owner, "transactions", {
+          title: recurrence.title,
+          amount: recurrence.amount,
+          type: recurrence.type,
+          category: recurrence.category,
+          ...(recurrence.subcategory
+            ? { subcategory: recurrence.subcategory }
+            : {}),
+          ...(recurrence.tags?.length ? { tags: recurrence.tags } : {}),
+          accountId: recurrence.accountId,
+          date: nextDate,
+          status: "pending",
+          installments: 1,
+          recurrenceId: row.id,
+        }));
+      const following = nextRecurrenceDate(nextDate, recurrence.frequency);
+      if (following <= nextDate) break;
+      nextDate = following;
+      generated += 1;
+    }
+    const active = !recurrence.endDate || nextDate <= recurrence.endDate;
+    if (generated || active !== recurrence.active) {
+      statements.push(
+        db
+          .prepare(
+            "UPDATE finance_records SET data = ? WHERE id = ? AND owner = ? AND kind = 'recurrences'",
+          )
+          .bind(
+            JSON.stringify({ ...recurrence, nextDate, active }),
+            row.id,
+            owner,
+          ),
+      );
+    }
+  }
+  if (statements.length) await db.batch(statements);
 }
 async function body(request: Request) {
   if (!request.headers.get("content-type")?.startsWith("application/json"))
@@ -431,6 +526,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         "Não foi possível acessar seus dados. Tente novamente.",
       );
     if (request.method === "GET" && path[0] === "state") {
+      await syncRecurrences(env.DB, owner);
       return json(await readState(env.DB, owner));
     }
     if (!["POST", "PUT", "DELETE"].includes(request.method))
@@ -472,6 +568,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       throw new HttpError(404, "Registro não encontrado.");
     if (request.method !== "POST" && !record)
       throw new HttpError(404, "Registro não encontrado.");
+    const createdIds: string[] = [];
     const statements: D1PreparedStatement[] = [
       env.DB.prepare(
         "INSERT INTO finance_requests (id, owner, created) VALUES (?, ?, ?)",
@@ -487,6 +584,22 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         throw new HttpError(
           409,
           "Esta conta possui lançamentos. Exclua ou mova os lançamentos primeiro.",
+        );
+      if (
+        kind === "accounts" &&
+        state.recurrences.some((recurrence) => recurrence.accountId === record!.id)
+      )
+        throw new HttpError(
+          409,
+          "Esta conta possui recorrências. Desative ou mova as recorrências primeiro.",
+        );
+      if (
+        kind === "categories" &&
+        state.categories.some((category) => category.parentId === record!.id)
+      )
+        throw new HttpError(
+          409,
+          "Esta categoria possui subcategorias. Exclua as subcategorias primeiro.",
         );
       statements.push(
         env.DB.prepare(
@@ -523,6 +636,22 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
             400,
             "Registre o pagamento do cartão como transferência.",
           );
+        if (
+          t.subcategory &&
+          !state.categories.some(
+            (category) =>
+              category.name === t.subcategory &&
+              category.type === (t.type === "income" ? "income" : "expense") &&
+              category.parentId ===
+                state.categories.find((parent) => parent.name === t.category)
+                  ?.id,
+          )
+        )
+          throw new HttpError(400, "Escolha uma subcategoria válida.");
+        if (
+          t.tags?.some((tagId) => !state.tags.some((tag) => tag.id === tagId))
+        )
+          throw new HttpError(400, "Existe uma tag inválida no lançamento.");
         if (
           t.installments > 1 &&
           (account.kind !== "credit" || t.type !== "expense")
@@ -565,6 +694,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
             t.amount,
             t.installments,
           ).entries()) {
+            const transactionId = crypto.randomUUID();
+            createdIds.push(transactionId);
             statements.push(
               insert(env.DB, owner, kind, {
                 ...t,
@@ -573,11 +704,89 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
                 purchaseDate: t.date,
                 groupId,
                 installment: i + 1,
-              }),
+              }, transactionId),
             );
           }
         }
       } else {
+        if (kind === "recurrences") {
+          const recurrence = schemas.recurrences.parse(data);
+          const recurrenceAccount = state.accounts.find(
+            (account) => account.id === recurrence.accountId,
+          );
+          if (!recurrenceAccount)
+            throw new HttpError(400, "Escolha uma conta válida.");
+          if (recurrenceAccount.kind === "credit" && recurrence.type === "income")
+            throw new HttpError(
+              400,
+              "Registre receitas em uma conta que receba dinheiro.",
+            );
+          if (recurrence.endDate && recurrence.endDate < recurrence.nextDate)
+            throw new HttpError(
+              400,
+              "A data final precisa ser posterior ao próximo lançamento.",
+            );
+          if (
+            recurrence.subcategory &&
+            !state.categories.some(
+              (category) =>
+                category.name === recurrence.subcategory &&
+                category.type === recurrence.type &&
+                category.parentId ===
+                  state.categories.find(
+                    (parent) => parent.name === recurrence.category,
+                  )?.id,
+            )
+          )
+            throw new HttpError(400, "Escolha uma subcategoria válida.");
+          if (
+            recurrence.tags?.some(
+              (tagId) => !state.tags.some((tag) => tag.id === tagId),
+            )
+          )
+            throw new HttpError(400, "Existe uma tag inválida na recorrência.");
+        }
+        if (kind === "categories") {
+          const category = schemas.categories.parse(data);
+          if (category.parentId) {
+            const parent = state.categories.find(
+              (candidate) => candidate.id === category.parentId,
+            );
+            if (!parent || parent.type !== category.type)
+              throw new HttpError(
+                400,
+                "A subcategoria precisa pertencer a uma categoria válida.",
+              );
+            if (record?.id === parent.id)
+              throw new HttpError(
+                400,
+                "Uma categoria não pode ser filha de si mesma.",
+              );
+          }
+          if (
+            state.categories.some(
+              (candidate) =>
+                candidate.id !== record?.id &&
+                candidate.type === category.type &&
+                candidate.parentId === category.parentId &&
+                candidate.name.toLocaleLowerCase() ===
+                  category.name.toLocaleLowerCase(),
+            )
+          )
+            throw new HttpError(409, "Já existe uma categoria com este nome.");
+        }
+        if (kind === "tags") {
+          const tag = schemas.tags.parse(data);
+          if (
+            state.tags.some(
+              (candidate) =>
+                candidate.id !== record?.id &&
+                candidate.name.toLocaleLowerCase() ===
+                  tag.name.toLocaleLowerCase(),
+            )
+          )
+            throw new HttpError(409, "Já existe uma tag com este nome.");
+        }
         if (kind === "budgets") {
           const b = schemas.budgets.parse(data);
           if (
@@ -599,11 +808,18 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
               "UPDATE finance_records SET data = ? WHERE id = ? AND owner = ? AND kind = ?",
             ).bind(JSON.stringify(data), record!.id, owner, kind),
           );
-        } else statements.push(insert(env.DB, owner, kind, data));
+        } else {
+          const recordId = crypto.randomUUID();
+          createdIds.push(recordId);
+          statements.push(insert(env.DB, owner, kind, data, recordId));
+        }
       }
     }
     await env.DB.batch(statements);
-    return json({ ok: true }, request.method === "POST" ? 201 : 200);
+    return json(
+      { ok: true, ...(createdIds[0] ? { id: createdIds[0] } : {}) },
+      request.method === "POST" ? 201 : 200,
+    );
   } catch (error) {
     if (error instanceof HttpError)
       return json({ error: error.message }, error.code);

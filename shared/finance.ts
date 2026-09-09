@@ -23,6 +23,9 @@ export type Transaction = {
     installments?: number;
     purchaseDate?: string;
     invoiceMonth?: string;
+    subcategory?: string;
+    tags?: string[];
+    recurrenceId?: string;
 };
 export type Budget = {
     id: string;
@@ -38,17 +41,51 @@ export type Goal = {
     date: string;
     color: string;
 };
+export type RecurrenceFrequency = "weekly" | "monthly" | "yearly";
+export type Recurrence = {
+    id: string;
+    title: string;
+    amount: number;
+    type: "expense" | "income";
+    category: string;
+    subcategory?: string;
+    tags?: string[];
+    accountId: string;
+    startDate: string;
+    nextDate: string;
+    frequency: RecurrenceFrequency;
+    endDate?: string;
+    active: boolean;
+};
+export type Category = {
+    id: string;
+    name: string;
+    type: "expense" | "income";
+    parentId?: string;
+    color: string;
+};
+export type Tag = {
+    id: string;
+    name: string;
+    color: string;
+};
 export type State = {
     accounts: Account[];
     transactions: Transaction[];
     budgets: Budget[];
     goals: Goal[];
+    recurrences: Recurrence[];
+    categories: Category[];
+    tags: Tag[];
 };
 export const EMPTY: State = {
     accounts: [],
     transactions: [],
     budgets: [],
     goals: [],
+    recurrences: [],
+    categories: [],
+    tags: [],
 };
 export const categories = [
     "Alimentação",
@@ -104,6 +141,18 @@ export function addMonths(date: string, n: number): string {
     return new Date(Date.UTC(y, m - 1 + n, Math.min(d, end)))
         .toISOString()
         .slice(0, 10);
+}
+export function addDays(date: string, n: number): string {
+    const value = new Date(`${date}T12:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + n);
+    return value.toISOString().slice(0, 10);
+}
+export function nextRecurrenceDate(
+    date: string,
+    frequency: RecurrenceFrequency,
+): string {
+    if (frequency === "weekly") return addDays(date, 7);
+    return addMonths(date, frequency === "yearly" ? 12 : 1);
 }
 export function cardDue(date: string, closing: number, due: number) {
     const [y, m, d] = date.split("-").map(Number);

@@ -28,7 +28,11 @@ O registro rápido aceita `Café 12,50` e abre uma conferência com descrição 
 - Transferências entre contas e registro de pagamento de fatura sem duplicar despesas.
 - Compras no cartão com até 48 parcelas, fechamento, vencimento e divisão exata dos centavos.
 - Orçamentos por categoria/mês, gráficos de despesas e fluxo acumulado mensal.
-- Metas com valor desejado, valor informado como guardado e data de objetivo.
+- Metas com valor desejado, valor informado como guardado, prazo e sugestão mensal de economia.
+- Onboarding em três passos para criar a primeira conta, informar renda e iniciar uma meta.
+- Lançamentos recorrentes semanais, mensais ou anuais, gerados no momento certo sem serviço externo.
+- Agenda financeira com compromissos vencidos e próximos, alertas internos e insights determinísticos.
+- Categorias personalizadas, subcategorias e tags aplicáveis a lançamentos e recorrências.
 - Modo foco, ocultação de valores e interface responsiva.
 
 ## Regras financeiras
@@ -56,7 +60,7 @@ Os valores transitam na API como **centavos inteiros**. Uma compra de R$ 100,00 
 - CSV neutraliza prefixos de fórmulas em campos exportados; conteúdo textual no app é renderizado pelo React.
 - Sem credenciais bancárias ou segredos no frontend.
 
-Os testes automatizados cobrem cálculos e regras de API, não constituem uma auditoria de segurança completa. Contas/cartões são cadastros manuais: não há Open Finance, conciliação bancária automática, notificações externas, geração recorrente de contas ou cálculo de juros/rendimentos nesta versão.
+Os testes automatizados cobrem cálculos, recorrências, taxonomia e regras de API, não constituem uma auditoria de segurança completa. Contas/cartões continuam sendo cadastros manuais: não há Open Finance, conciliação bancária automática, notificações externas ou cálculo de juros/rendimentos nesta versão. Alertas e insights são exibidos dentro do app, sem dependência de IA ou provedor pago.
 
 ## Desenvolvimento e verificação
 
