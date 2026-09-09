@@ -26,6 +26,8 @@ export type Transaction = {
     subcategory?: string;
     tags?: string[];
     recurrenceId?: string;
+    incomePlanId?: string;
+    incomePeriod?: string;
 };
 export type Budget = {
     id: string;
@@ -57,6 +59,19 @@ export type Recurrence = {
     endDate?: string;
     active: boolean;
 };
+export type IncomePlan = {
+    id: string;
+    title: string;
+    amount: number;
+    accountId?: string;
+    dayOfMonth?: number;
+    startMonth: string;
+    nextPeriod?: string;
+    nextDate?: string;
+    active: boolean;
+    automatic: boolean;
+    businessDayRule: "previous_business_day";
+};
 export type Category = {
     id: string;
     name: string;
@@ -75,6 +90,7 @@ export type State = {
     budgets: Budget[];
     goals: Goal[];
     recurrences: Recurrence[];
+    incomePlans: IncomePlan[];
     categories: Category[];
     tags: Tag[];
 };
@@ -84,6 +100,7 @@ export const EMPTY: State = {
     budgets: [],
     goals: [],
     recurrences: [],
+    incomePlans: [],
     categories: [],
     tags: [],
 };
@@ -146,6 +163,59 @@ export function addDays(date: string, n: number): string {
     const value = new Date(`${date}T12:00:00Z`);
     value.setUTCDate(value.getUTCDate() + n);
     return value.toISOString().slice(0, 10);
+}
+function easterSunday(year: number): string {
+    const a = year % 19;
+    const b = Math.floor(year / 100);
+    const c = year % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function brazilianHolidays(year: number): Set<string> {
+    const fixed = [
+        "01-01",
+        "04-21",
+        "05-01",
+        "09-07",
+        "10-12",
+        "11-02",
+        "11-15",
+        "11-20",
+        "12-25",
+    ].map((monthDay) => `${year}-${monthDay}`);
+    const easter = easterSunday(year);
+    return new Set([
+        ...fixed,
+        addDays(easter, -48),
+        addDays(easter, -47),
+        addDays(easter, -2),
+        addDays(easter, 60),
+    ]);
+}
+export function isBusinessDay(date: string): boolean {
+    const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+    return (
+        day !== 0 &&
+        day !== 6 &&
+        !brazilianHolidays(Number(date.slice(0, 4))).has(date)
+    );
+}
+export function scheduledIncomeDate(month: string, dayOfMonth: number): string {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+    let result = `${month}-${String(Math.min(dayOfMonth, lastDay)).padStart(2, "0")}`;
+    while (!isBusinessDay(result)) result = addDays(result, -1);
+    return result;
 }
 export function nextRecurrenceDate(
     date: string,

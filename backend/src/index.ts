@@ -3,8 +3,10 @@ import {
   addMonths,
   cardDue,
   nextRecurrenceDate,
+  scheduledIncomeDate,
   splitAmount,
   today,
+  type IncomePlan,
   type Recurrence,
   type State,
   type Transaction,
@@ -27,6 +29,7 @@ const date = z
     const d = new Date(v + "T12:00:00Z");
     return !isNaN(+d) && d.toISOString().slice(0, 10) === v;
   }, "Data inválida");
+const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const name = z.string().trim().min(1).max(100);
 const id = z.string().min(1).max(100);
 const color = z.string().regex(/^#[\da-fA-F]{6}$/);
@@ -85,6 +88,20 @@ const schemas = {
       active: z.boolean(),
     })
     .strict(),
+  incomePlans: z
+    .object({
+      title: name,
+      amount,
+      accountId: id.optional(),
+      dayOfMonth: z.number().int().min(1).max(31).optional(),
+      startMonth: month,
+      nextPeriod: month.optional(),
+      nextDate: date.optional(),
+      active: z.boolean(),
+      automatic: z.boolean(),
+      businessDayRule: z.literal("previous_business_day"),
+    })
+    .strict(),
   categories: z
     .object({
       name,
@@ -132,6 +149,7 @@ export async function readState(db: D1Database, owner: string): Promise<State> {
     budgets: [],
     goals: [],
     recurrences: [],
+    incomePlans: [],
     categories: [],
     tags: [],
   };
@@ -151,6 +169,19 @@ function insert(
   return db
     .prepare(
       "INSERT INTO finance_records (id, owner, kind, data, created) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(recordId, owner, kind, JSON.stringify(data), Date.now());
+}
+function insertIfMissing(
+  db: D1Database,
+  owner: string,
+  kind: string,
+  data: object,
+  recordId: string,
+) {
+  return db
+    .prepare(
+      "INSERT OR IGNORE INTO finance_records (id, owner, kind, data, created) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(recordId, owner, kind, JSON.stringify(data), Date.now());
 }
@@ -208,6 +239,108 @@ async function syncRecurrences(db: D1Database, owner: string) {
           )
           .bind(
             JSON.stringify({ ...recurrence, nextDate, active }),
+            row.id,
+            owner,
+          ),
+      );
+    }
+  }
+  if (statements.length) await db.batch(statements);
+}
+type IncomePlanInput = z.infer<typeof schemas.incomePlans>;
+function normalizeIncomePlan(
+  input: IncomePlanInput,
+  previous?: IncomePlan,
+): Omit<IncomePlan, "id"> {
+  const normalized: Omit<IncomePlan, "id"> = {
+    title: input.title,
+    amount: input.amount,
+    ...(input.accountId ? { accountId: input.accountId } : {}),
+    ...(input.dayOfMonth ? { dayOfMonth: input.dayOfMonth } : {}),
+    startMonth: input.startMonth,
+    active: input.automatic && input.active,
+    automatic: input.automatic,
+    businessDayRule: "previous_business_day",
+  };
+  if (input.automatic && input.dayOfMonth) {
+    const requestedPeriod =
+      input.nextPeriod ?? previous?.nextPeriod ?? input.startMonth;
+    const nextPeriod =
+      requestedPeriod < input.startMonth ? input.startMonth : requestedPeriod;
+    normalized.nextPeriod = nextPeriod;
+    normalized.nextDate = scheduledIncomeDate(
+      nextPeriod,
+      input.dayOfMonth,
+    );
+  }
+  return normalized;
+}
+async function syncIncomePlans(db: D1Database, owner: string) {
+  const { results } = await db
+    .prepare(
+      "SELECT id, data FROM finance_records WHERE owner = ? AND kind = 'incomePlans' ORDER BY created, id",
+    )
+    .bind(owner)
+    .all<{ id: string; data: string }>();
+  const cutoff = today();
+  const statements: D1PreparedStatement[] = [];
+  for (const row of results) {
+    let plan: Omit<IncomePlan, "id">;
+    try {
+      plan = JSON.parse(row.data) as Omit<IncomePlan, "id">;
+    } catch {
+      continue;
+    }
+    if (
+      !plan.automatic ||
+      !plan.active ||
+      !plan.accountId ||
+      !plan.dayOfMonth ||
+      !plan.startMonth
+    )
+      continue;
+    let nextPeriod = plan.nextPeriod ?? plan.startMonth;
+    let nextDate = scheduledIncomeDate(nextPeriod, plan.dayOfMonth);
+    let generated = 0;
+    while (nextDate <= cutoff && generated < 120) {
+      statements.push(
+        insertIfMissing(
+          db,
+          owner,
+          "transactions",
+          {
+            title: plan.title,
+            amount: plan.amount,
+            type: "income",
+            category: "Salário",
+            accountId: plan.accountId,
+            date: nextDate,
+            status: "paid",
+            installments: 1,
+            incomePlanId: row.id,
+            incomePeriod: nextPeriod,
+          },
+          `income-plan:${row.id}:${nextPeriod}`,
+        ),
+      );
+      const following = addMonths(`${nextPeriod}-01`, 1).slice(0, 7);
+      if (following <= nextPeriod) break;
+      nextPeriod = following;
+      nextDate = scheduledIncomeDate(nextPeriod, plan.dayOfMonth);
+      generated += 1;
+    }
+    if (
+      generated ||
+      plan.nextPeriod !== nextPeriod ||
+      plan.nextDate !== nextDate
+    ) {
+      statements.push(
+        db
+          .prepare(
+            "UPDATE finance_records SET data = ? WHERE id = ? AND owner = ? AND kind = 'incomePlans'",
+          )
+          .bind(
+            JSON.stringify({ ...plan, nextPeriod, nextDate }),
             row.id,
             owner,
           ),
@@ -527,6 +660,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         "Não foi possível acessar seus dados. Tente novamente.",
       );
     if (request.method === "GET" && path[0] === "state") {
+      await syncIncomePlans(env.DB, owner);
       await syncRecurrences(env.DB, owner);
       return json(await readState(env.DB, owner));
     }
@@ -595,6 +729,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           "Esta conta possui recorrências. Desative ou mova as recorrências primeiro.",
         );
       if (
+        kind === "accounts" &&
+        state.incomePlans.some(
+          (plan) => plan.automatic && plan.accountId === record!.id,
+        )
+      )
+        throw new HttpError(
+          409,
+          "Esta conta recebe uma renda automática. Desative ou mova o agendamento primeiro.",
+        );
+      if (
         kind === "categories" &&
         state.categories.some((category) => category.parentId === record!.id)
       )
@@ -617,7 +761,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
             .map((i) => `${i.path.join(".")}: ${i.message}`)
             .join("; "),
         );
-      const data = parsed.data;
+      let data: object = parsed.data;
       if (kind === "transactions") {
         const t = schemas.transactions.parse(data);
         const account = state.accounts.find((a) => a.id === t.accountId);
@@ -710,6 +854,28 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           }
         }
       } else {
+        if (kind === "incomePlans") {
+          const plan = schemas.incomePlans.parse(data);
+          const planAccount = plan.accountId
+            ? state.accounts.find((account) => account.id === plan.accountId)
+            : undefined;
+          if (plan.automatic && !planAccount)
+            throw new HttpError(
+              400,
+              "Escolha a conta que receberá a renda automática.",
+            );
+          if (planAccount?.kind === "credit")
+            throw new HttpError(
+              400,
+              "A renda automática precisa cair em uma conta bancária ou carteira.",
+            );
+          if (plan.automatic && plan.dayOfMonth === undefined)
+            throw new HttpError(400, "Informe o dia fixo do recebimento.");
+          data = normalizeIncomePlan(
+            plan,
+            record as IncomePlan | undefined,
+          );
+        }
         if (kind === "recurrences") {
           const recurrence = schemas.recurrences.parse(data);
           const recurrenceAccount = state.accounts.find(
