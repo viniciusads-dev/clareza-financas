@@ -1,0 +1,63 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "b1e4d5c8-1d6d-4f1f-b6f8-64d7f0c6b1ce",
+  "prevId": "5ad8e53b-fb5d-47d9-b93c-cf9be034940f",
+  "tables": {
+    "finance_records": {
+      "name": "finance_records",
+      "columns": {
+        "id": {"name":"id","type":"text","primaryKey":true,"notNull":true,"autoincrement":false},
+        "owner": {"name":"owner","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "kind": {"name":"kind","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "data": {"name":"data","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "created": {"name":"created","type":"integer","primaryKey":false,"notNull":true,"autoincrement":false}
+      },
+      "indexes": {"idx_finance_owner_kind":{"name":"idx_finance_owner_kind","columns":["owner","kind"],"isUnique":false}},
+      "foreignKeys": {}, "compositePrimaryKeys": {}, "uniqueConstraints": {}, "checkConstraints": {}
+    },
+    "finance_requests": {
+      "name": "finance_requests",
+      "columns": {
+        "id": {"name":"id","type":"text","primaryKey":true,"notNull":true,"autoincrement":false},
+        "owner": {"name":"owner","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "created": {"name":"created","type":"integer","primaryKey":false,"notNull":true,"autoincrement":false}
+      },
+      "indexes": {"idx_requests_owner_created":{"name":"idx_requests_owner_created","columns":["owner","created"],"isUnique":false}},
+      "foreignKeys": {}, "compositePrimaryKeys": {}, "uniqueConstraints": {}, "checkConstraints": {}
+    },
+    "app_users": {
+      "name": "app_users",
+      "columns": {
+        "id": {"name":"id","type":"text","primaryKey":true,"notNull":true,"autoincrement":false},
+        "email": {"name":"email","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "name": {"name":"name","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "password_hash": {"name":"password_hash","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "password_salt": {"name":"password_salt","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "password_iterations": {"name":"password_iterations","type":"integer","primaryKey":false,"notNull":true,"autoincrement":false},
+        "created": {"name":"created","type":"integer","primaryKey":false,"notNull":true,"autoincrement":false}
+      },
+      "indexes": {"idx_app_users_email":{"name":"idx_app_users_email","columns":["email"],"isUnique":true}},
+      "foreignKeys": {}, "compositePrimaryKeys": {}, "uniqueConstraints": {}, "checkConstraints": {}
+    },
+    "app_sessions": {
+      "name": "app_sessions",
+      "columns": {
+        "id": {"name":"id","type":"text","primaryKey":true,"notNull":true,"autoincrement":false},
+        "user_id": {"name":"user_id","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "token_hash": {"name":"token_hash","type":"text","primaryKey":false,"notNull":true,"autoincrement":false},
+        "created": {"name":"created","type":"integer","primaryKey":false,"notNull":true,"autoincrement":false},
+        "expires": {"name":"expires","type":"integer","primaryKey":false,"notNull":true,"autoincrement":false}
+      },
+      "indexes": {
+        "idx_app_sessions_token_hash":{"name":"idx_app_sessions_token_hash","columns":["token_hash"],"isUnique":true},
+        "idx_app_sessions_user_expires":{"name":"idx_app_sessions_user_expires","columns":["user_id","expires"],"isUnique":false}
+      },
+      "foreignKeys": {}, "compositePrimaryKeys": {}, "uniqueConstraints": {}, "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {"schemas": {}, "tables": {}, "columns": {}},
+  "internal": {"indexes": {}}
+}

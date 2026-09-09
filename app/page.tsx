@@ -1,2 +1,5 @@
-import FinanceApp from '@/frontend/FinanceApp';
-export default function Home() { return <FinanceApp />; }
+import AppEntry from '@/frontend/AppEntry';
+
+export default function Home(){
+  return <AppEntry/>;
+}

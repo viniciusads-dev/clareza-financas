@@ -19,7 +19,7 @@ O registro rápido aceita `Café 12,50` e abre uma conferência com descrição 
 | `app/` | Entrada e metadados do frontend. |
 | `worker/index.ts` | Adaptador da hospedagem: encaminha `/api/*` ao backend e o restante ao frontend. |
 
-**Nesta entrega, frontend e backend são módulos separados que se comunicam por HTTP, publicados no mesmo Worker e domínio. Não são dois serviços implantados independentemente.** O backend não depende do framework de apresentação e pode ser extraído, mas essa mudança exige configurar um gateway de identidade confiável e a política de origens para o novo ambiente. A separação de pastas, por si só, não assegura o sistema.
+**Nesta entrega, frontend e backend são módulos separados que se comunicam por HTTP, publicados no mesmo Worker e domínio. Não são dois serviços implantados independentemente.** O backend não depende do framework de apresentação e mantém a sessão e a autorização no servidor. A separação de pastas, por si só, não assegura o sistema.
 
 ## Funcionalidades
 
@@ -46,8 +46,9 @@ Os valores transitam na API como **centavos inteiros**. Uma compra de R$ 100,00 
 
 ## Segurança implementada
 
-- Identidade obtida no servidor pelo cabeçalho `oai-authenticated-user-id`, injetado pelo gateway autenticado da hospedagem privada.
-- Não exponha diretamente este Worker em outra infraestrutura confiando em cabeçalhos enviados pelo navegador. Fora desse gateway, é necessário substituir a integração por autenticação verificada no servidor.
+- Cadastro e login próprios do Clareza, com senha derivada por PBKDF2 e sessões em cookie HttpOnly.
+- Cada registro financeiro usa o ID da conta autenticada no servidor; o navegador nunca envia um proprietário escolhido pelo usuário.
+- Não confie em identificadores enviados pelo navegador: o proprietário dos dados é obtido da sessão HttpOnly validada no servidor.
 - Leituras e mutações sempre usam o proprietário autenticado, inclusive verificações de referências entre contas e lançamentos.
 - API rejeita acessos sem identidade, escrita de outra origem, tipos inválidos, centavos fracionários, datas impossíveis e payloads maiores que 16 KB.
 - SQL parametrizado, operações de múltiplas parcelas em lote transacional, chaves de idempotência por operação e respostas privadas com `Cache-Control: no-store`.
@@ -69,7 +70,7 @@ npx tsc --noEmit
 npm run build
 ```
 
-O acesso aos dados requer a identidade fornecida pela hospedagem. A execução local comum não inventa um usuário e retorna 401 na API. Os testes executam a API diretamente contra SQLite em memória e fornecem identidades apenas no ambiente de teste. As migrações D1 são aplicadas pela hospedagem antes da publicação.
+O acesso aos dados requer uma sessão criada pelo cadastro ou login. Em desenvolvimento, o banco D1 local precisa receber as migrações antes do primeiro cadastro. As migrações D1 são aplicadas pela hospedagem antes da publicação.
 
 ## Referências de produto
 
