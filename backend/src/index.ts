@@ -15,7 +15,8 @@ export interface Env {
 type AppUser = { id: string; email: string; name: string };
 const SESSION_COOKIE = "clareza_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const PASSWORD_ITERATIONS = 120000;
+// Cloudflare Workers limits PBKDF2 to 100,000 iterations.
+const PASSWORD_ITERATIONS = 100000;
 const encoder = new TextEncoder();
 const cents = z.number().int().min(0).max(100000000000);
 const amount = cents.min(1);
