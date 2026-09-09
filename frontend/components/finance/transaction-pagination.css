@@ -1,0 +1,18 @@
+.transaction-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.transaction-pagination > span {
+  font-size: 13px;
+  color: #62765a;
+}
+
+.transaction-pagination button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
