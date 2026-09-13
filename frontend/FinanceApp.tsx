@@ -6,7 +6,7 @@ import { logout as authLogout, type AuthUser } from "./api";
 import FinanceLayout from "./components/finance/FinanceLayout";
 import PageLoading from "./components/finance/PageLoading";
 import { createEditor } from "./finance/editor";
-import type { Deletion, Editor, PageProps, View } from "./finance/types";
+import { ALL_ACCOUNTS, type Deletion, type Editor, type PageProps, type View } from "./finance/types";
 import { createUiSession } from "./finance/ui-session";
 import { useFinanceData } from "./hooks/useFinanceData";
 
@@ -36,6 +36,7 @@ export default function FinanceApp({ user, onLogout }: { user: AuthUser; onLogou
   const [deletion, setDeletion] = useState<Deletion | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [quickVersion, setQuickVersion] = useState(0);
+  const [overviewAccountId, setOverviewAccountId] = useState(ALL_ACCOUNTS);
   // Non-reactive navigation cache. Input edits update only the owning component.
   // The cache is discarded with the authenticated app on logout.
   const [uiSession] = useState(createUiSession);
@@ -47,6 +48,20 @@ export default function FinanceApp({ user, onLogout }: { user: AuthUser; onLogou
     }
     setEditor(createEditor(real, month, kind, record, extra));
   }, [demo, real, month, start]);
+  const openEditorForContext = useCallback<PageProps["openEditor"]>((kind, record, extra) => {
+    const accountId =
+      view === "overview" &&
+      kind === "transactions" &&
+      !record &&
+      overviewAccountId !== ALL_ACCOUNTS
+        ? overviewAccountId
+        : undefined;
+    openEditor(
+      kind,
+      record,
+      accountId ? { ...(extra ?? {}), accountId } : extra,
+    );
+  }, [openEditor, overviewAccountId, view]);
   const askDelete = useCallback<PageProps["askDelete"]>((kind, id, name) => {
     if (demo) { toast("Os dados desta prévia são fictícios."); return; }
     setDeletion({ kind, id, name });
@@ -66,7 +81,7 @@ export default function FinanceApp({ user, onLogout }: { user: AuthUser; onLogou
   }, [uiSession]);
   const Page = pages[view];
   return (
-    <FinanceLayout {...{ view, setView, focus, hidden, preference, user, signOut, month, setMonth, demo, start, openEditor }}
+    <FinanceLayout {...{ view, setView, focus, hidden, preference, user, signOut, month, setMonth, demo, start, openEditor: openEditorForContext }}
       dialogs={<Suspense fallback={<span role="status" className="sr-only">Carregando formulário…</span>}>
         {editor && <EditorDialog initial={editor} state={state} refresh={refresh} onClose={() => setEditor(null)} onSaved={onSaved} />}
         {onboardingOpen && <OnboardingDialog refresh={refresh} onClose={() => setOnboardingOpen(false)} onComplete={() => setDemo(false)} />}
@@ -80,7 +95,7 @@ export default function FinanceApp({ user, onLogout }: { user: AuthUser; onLogou
         </div>
       ) : loading ? <PageLoading /> : (
         <Suspense fallback={<PageLoading />}>
-          <Page {...{ state, month, hidden, focus, demo, openEditor, askDelete, setView, start, preference, uiSession, quickVersion }} />
+          <Page {...{ state, month, hidden, focus, demo, openEditor: openEditorForContext, askDelete, setView, start, preference, uiSession, quickVersion, overviewAccountId, setOverviewAccountId }} />
         </Suspense>
       )}
     </FinanceLayout>

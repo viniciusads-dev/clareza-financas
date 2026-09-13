@@ -1,46 +1,117 @@
 import { agendaFor, categoryTotals } from "@/frontend/finance/presentation";
-import type { AlertItem } from "@/frontend/finance/types";
-import { addDays, addMonths, balances, brl, monthStats, today, type State } from "@/shared/finance";
+import { ALL_ACCOUNTS, type AlertItem } from "@/frontend/finance/types";
+import {
+  addDays,
+  addMonths,
+  balances,
+  brl,
+  invoiceBalance,
+  monthStats,
+  today,
+  type State,
+} from "@/shared/finance";
 import { CircleAlert, Lightbulb, Repeat, TrendingUp } from "lucide-react";
-export function overviewModel(state: State, month: string) {
-  const stats = monthStats(state, month);
-  const previousStats = monthStats(state, addMonths(`${month}-01`, -1).slice(0, 7));
+
+export function transactionsForAccount(state: State, accountId: string) {
+  if (accountId === ALL_ACCOUNTS) return state.transactions;
+  return state.transactions.filter(
+    (transaction) =>
+      transaction.accountId === accountId || transaction.toId === accountId,
+  );
+}
+
+function stateForAccount(state: State, accountId: string, exists: boolean): State {
+  if (!exists || accountId === ALL_ACCOUNTS) return state;
+  return {
+    ...state,
+    transactions: transactionsForAccount(state, accountId),
+    recurrences: state.recurrences.filter(
+      (recurrence) => recurrence.accountId === accountId,
+    ),
+    incomePlans: state.incomePlans.filter(
+      (plan) => plan.accountId === accountId,
+    ),
+  };
+}
+
+export function overviewModel(
+  state: State,
+  month: string,
+  accountId = ALL_ACCOUNTS,
+) {
+  const selectedAccount = state.accounts.find(
+    (account) => account.id === accountId,
+  );
+  const scopedState = stateForAccount(
+    state,
+    accountId,
+    Boolean(selectedAccount),
+  );
+  const stats = monthStats(scopedState, month);
+  const previousStats = monthStats(
+    scopedState,
+    addMonths(`${month}-01`, -1).slice(0, 7),
+  );
   const balancesByAccount = balances(state);
-  const cash = state.accounts
-    .filter((account) => account.kind !== "credit")
-    .reduce((sum, account) => sum + (balancesByAccount[account.id] ?? 0), 0);
-  const cardDebt = state.accounts
-    .filter((account) => account.kind === "credit")
-    .reduce(
-      (sum, account) =>
-        sum + Math.max(0, -(balancesByAccount[account.id] ?? 0)),
-      0,
-    );
-  const cashPending = state.transactions
-    .filter(
-      (transaction) =>
-        transaction.type === "expense" &&
-        transaction.status === "pending" &&
-        state.accounts.find((account) => account.id === transaction.accountId)
-          ?.kind !== "credit",
-    )
-    .reduce((sum, transaction) => sum + transaction.amount, 0);
-  const available = cash - cardDebt - cashPending;
+
+  let cash = 0;
+  let cardDebt = 0;
+  let cashPending = 0;
+  if (selectedAccount) {
+    const accountBalance = balancesByAccount[selectedAccount.id] ?? 0;
+    if (selectedAccount.kind === "credit") {
+      cardDebt = Math.max(0, -accountBalance);
+    } else {
+      cash = accountBalance;
+      cashPending = scopedState.transactions
+        .filter(
+          (transaction) =>
+            transaction.type === "expense" &&
+            transaction.status === "pending",
+        )
+        .reduce((sum, transaction) => sum + transaction.amount, 0);
+    }
+  } else {
+    cash = state.accounts
+      .filter((account) => account.kind !== "credit")
+      .reduce((sum, account) => sum + (balancesByAccount[account.id] ?? 0), 0);
+    cardDebt = state.accounts
+      .filter((account) => account.kind === "credit")
+      .reduce(
+        (sum, account) =>
+          sum + Math.max(0, -(balancesByAccount[account.id] ?? 0)),
+        0,
+      );
+    cashPending = state.transactions
+      .filter(
+        (transaction) =>
+          transaction.type === "expense" &&
+          transaction.status === "pending" &&
+          state.accounts.find((account) => account.id === transaction.accountId)
+            ?.kind !== "credit",
+      )
+      .reduce((sum, transaction) => sum + transaction.amount, 0);
+  }
+
+  const selectedInvoice =
+    selectedAccount?.kind === "credit"
+      ? invoiceBalance(state, selectedAccount.id, month)
+      : 0;
+  const available =
+    selectedAccount?.kind === "credit"
+      ? selectedAccount.limit - cardDebt
+      : cash - cardDebt - cashPending;
   const currentDate = today();
-
-
-
   const categoryData = categoryTotals(stats.tx);
   const previousCategoryData = categoryTotals(previousStats.tx);
   const monthlyBudgets = state.budgets.filter(
     (budget) => budget.month === month,
   );
+  const agendaItems = agendaFor(scopedState, currentDate);
 
-
-  const agendaItems = agendaFor(state, currentDate);
   const alerts: AlertItem[] = (() => {
     const items: AlertItem[] = [];
-    const overdue = state.transactions.filter(
+    const overdue = scopedState.transactions.filter(
       (transaction) =>
         transaction.type === "expense" &&
         transaction.status === "pending" &&
@@ -69,7 +140,7 @@ export function overviewModel(state: State, month: string) {
         (budget) =>
           (categoryData.find((category) => category.name === budget.category)
             ?.value ?? 0) /
-          budget.amount >=
+            budget.amount >=
           0.8,
       )
       .slice(0, 2)
@@ -100,6 +171,7 @@ export function overviewModel(state: State, month: string) {
       });
     return items.slice(0, 5);
   })();
+
   const insights = (() => {
     const result: {
       id: string;
@@ -131,7 +203,7 @@ export function overviewModel(state: State, month: string) {
         detail: `Você passou ${brl((categoryData.find((category) => category.name === overBudget.category)?.value ?? 0) - overBudget.amount)} do limite planejado.`,
         icon: CircleAlert,
       });
-    const recurringTotal = state.recurrences
+    const recurringTotal = scopedState.recurrences
       .filter(
         (recurrence) =>
           recurrence.active &&
@@ -156,6 +228,7 @@ export function overviewModel(state: State, month: string) {
       });
     return result.slice(0, 3);
   })();
+
   const chartData = Array.from(
     {
       length: new Date(
@@ -186,6 +259,19 @@ export function overviewModel(state: State, month: string) {
     },
   );
 
-
-  return { stats, cash, cardDebt, cashPending, available, categoryData, monthlyBudgets, agendaItems, alerts, insights, chartData };
+  return {
+    stats,
+    cash,
+    cardDebt,
+    cashPending,
+    available,
+    categoryData,
+    monthlyBudgets,
+    agendaItems,
+    alerts,
+    insights,
+    chartData,
+    selectedAccount,
+    selectedInvoice,
+  };
 }

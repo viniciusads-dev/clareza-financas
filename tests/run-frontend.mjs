@@ -5,6 +5,7 @@ await build({
   stdin: {
     contents: `
       export {default as OverviewPage} from './frontend/pages/OverviewPage';
+      export {overviewModel, transactionsForAccount} from './frontend/pages/overview-model';
       export {default as TransactionsPage} from './frontend/pages/TransactionsPage';
       export {filterTransactions} from './frontend/finance/transactions';
       export {createEditor} from './frontend/finance/editor';

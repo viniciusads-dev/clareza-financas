@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import { ArrowUpRight, CreditCard, Info, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CreditCard, Info, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
 
@@ -10,7 +10,7 @@ import { monthLabel } from "@/frontend/finance/presentation";
 import type { PageProps } from "@/frontend/finance/types";
 import Empty from "@/frontend/components/finance/Empty";
 
-export default function AccountsPage({ state, month, hidden, openEditor, askDelete, start }: Pick<PageProps, "state" | "month" | "hidden" | "openEditor" | "askDelete" | "start">) {
+export default function AccountsPage({ state, month, hidden, openEditor, askDelete, start, setView, setOverviewAccountId }: Pick<PageProps, "state" | "month" | "hidden" | "openEditor" | "askDelete" | "start" | "setView" | "setOverviewAccountId">) {
   function displayMoney(value: number) {
     return hidden ? "R$ •••••" : brl(value);
   }
@@ -85,6 +85,17 @@ export default function AccountsPage({ state, month, hidden, openEditor, askDele
                 <strong>
                   {displayMoney(balancesByAccount[account.id] ?? 0)}
                 </strong>
+              </div>
+              <div className="account-card-footer">
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setOverviewAccountId?.(account.id);
+                    setView("overview");
+                  }}
+                >
+                  Ver visão da conta <ArrowRight size={15} />
+                </button>
               </div>
             </article>
           ))}
@@ -161,6 +172,15 @@ export default function AccountsPage({ state, month, hidden, openEditor, askDele
                     }
                   />
                   <div className="row-actions">
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setOverviewAccountId?.(account.id);
+                        setView("overview");
+                      }}
+                    >
+                      Ver visão <ArrowRight size={15} />
+                    </button>
                     <button
                       className="text-button"
                       onClick={() =>

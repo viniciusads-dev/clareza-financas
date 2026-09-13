@@ -3,12 +3,13 @@ import { memo, useMemo, type CSSProperties } from "react";
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Bell, CalendarDays, CheckCircle2, CircleAlert, Eye, EyeOff, Lightbulb, Plus, Sparkles, Wallet } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { brl } from "@/shared/finance";
 
 import { monthLabel, categoryColorFor } from "@/frontend/finance/presentation";
-import type { AlertItem, PageProps } from "@/frontend/finance/types";
+import { ALL_ACCOUNTS, type AlertItem, type PageProps } from "@/frontend/finance/types";
 import Empty from "@/frontend/components/finance/Empty";
 
 import TransactionTable from "@/frontend/components/finance/TransactionTable";
@@ -18,12 +19,20 @@ import QuickEntry from "@/frontend/components/finance/QuickEntry";
 
 import { overviewModel } from "./overview-model";
 
-function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setView, preference, uiSession, quickVersion }: Pick<PageProps, "state" | "month" | "hidden" | "focus" | "openEditor" | "askDelete" | "setView" | "preference" | "uiSession" | "quickVersion">) {
+function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setView, preference, uiSession, quickVersion, overviewAccountId, setOverviewAccountId }: Pick<PageProps, "state" | "month" | "hidden" | "focus" | "openEditor" | "askDelete" | "setView" | "preference" | "uiSession" | "quickVersion" | "overviewAccountId" | "setOverviewAccountId">) {
   function displayMoney(value: number) {
     return hidden ? "R$ •••••" : brl(value);
   }
   const categoryColor = (name: string) => categoryColorFor(state, name);
-  const { stats, cash, cardDebt, cashPending, available, categoryData, monthlyBudgets, agendaItems, alerts, insights, chartData } = useMemo(() => overviewModel(state, month), [state, month]);
+  const selectedAccountId = overviewAccountId ?? ALL_ACCOUNTS;
+  const updateAccount = setOverviewAccountId ?? (() => {});
+  const { stats, cash, cardDebt, cashPending, available, categoryData, monthlyBudgets, agendaItems, alerts, insights, chartData, selectedAccount, selectedInvoice } = useMemo(
+    () => overviewModel(state, month, selectedAccountId),
+    [state, month, selectedAccountId],
+  );
+  const headlineBalance = selectedAccount?.kind === "credit"
+    ? selectedAccount.limit - cardDebt
+    : available;
   const recentTransactions = useMemo(() => [...stats.tx].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5), [stats.tx]);
   const alertCard = (alert: AlertItem) => (
     <div className={`alert-item ${alert.tone}`} key={alert.id}>
@@ -42,11 +51,56 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
   );
   return (
     <>
+      <section className="overview-filter" aria-label="Visualização da visão geral por conta">
+        <div className="overview-filter-intro">
+          <span className="overview-filter-icon" aria-hidden="true">
+            <Wallet size={18} />
+          </span>
+          <div>
+            <span className="overview-filter-label">VISUALIZAÇÃO POR CONTA</span>
+            <strong>
+              {selectedAccount
+                ? `Visão de ${selectedAccount.name}`
+                : "Visão consolidada"}
+            </strong>
+            <p>
+              {selectedAccount
+                ? "Os indicadores abaixo consideram apenas esta conta."
+                : "Veja o panorama de todas as suas contas e cartões."}
+            </p>
+          </div>
+        </div>
+        <div className="overview-filter-control">
+          <label htmlFor="overview-account-filter">Ver por conta</label>
+          <NativeSelect
+            id="overview-account-filter"
+            className="overview-filter-select"
+            value={selectedAccount ? selectedAccount.id : ALL_ACCOUNTS}
+            onChange={(event) => updateAccount(event.target.value)}
+            aria-label="Selecionar conta para a visão geral"
+          >
+            <NativeSelectOption value={ALL_ACCOUNTS}>
+              Todas as contas
+            </NativeSelectOption>
+            {state.accounts.map((account) => (
+              <NativeSelectOption value={account.id} key={account.id}>
+                {account.name} · {account.kind === "credit" ? "Cartão" : account.kind === "cash" ? "Carteira" : "Conta"}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+      </section>
       <section className="summary-grid">
         <article className="balance-card">
           <div className="card-eyebrow">
             <Wallet size={17} />
-            <span>Disponível após compromissos</span>
+            <span>
+              {selectedAccount?.kind === "credit"
+                ? "Limite disponível"
+                : selectedAccount
+                  ? "Disponível após pendências"
+                  : "Disponível após compromissos"}
+            </span>
             <button
               className="icon-button"
               onClick={() => preference("hidden", !hidden)}
@@ -56,28 +110,53 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
             </button>
           </div>
           <div
-            className={`big-balance ${available < 0 ? "negative" : ""}`}
+            className={`big-balance ${headlineBalance < 0 ? "negative" : ""}`}
           >
-            {displayMoney(available)}
+            {displayMoney(headlineBalance)}
           </div>
           <div className="balance-note">
             <span className="balance-status">
               <span />
-              {available >= 0
-                ? "Um panorama do que você tem hoje"
-                : "Vamos reorganizar os próximos passos"}
+              {selectedAccount?.kind === "credit"
+                ? headlineBalance >= 0
+                  ? "Limite restante para novas compras"
+                  : "O limite foi ultrapassado; revise a fatura"
+                : headlineBalance >= 0
+                  ? selectedAccount
+                    ? "Saldo disponível depois dos pendentes"
+                    : "Um panorama do que você tem hoje"
+                  : "Vamos reorganizar os próximos passos"}
             </span>
           </div>
           <div className="balance-bottom">
-            <span>
-              Saldo em contas <strong>{displayMoney(cash)}</strong>
-            </span>
-            <span title="Despesas pendentes e toda a dívida dos cartões.">
-              Compromissos{" "}
-              <strong>
-                {displayMoney(cardDebt + cashPending)}
-              </strong>
-            </span>
+            {selectedAccount?.kind === "credit" ? (
+              <>
+                <span>
+                  Fatura de {monthLabel(month)} <strong>{displayMoney(selectedInvoice)}</strong>
+                </span>
+                <span title="Dívida total, incluindo parcelas futuras.">
+                  Dívida total <strong>{displayMoney(cardDebt)}</strong>
+                </span>
+              </>
+            ) : selectedAccount ? (
+              <>
+                <span>
+                  Saldo atual <strong>{displayMoney(cash)}</strong>
+                </span>
+                <span title="Despesas pendentes que ainda não debitaram o saldo.">
+                  Pendentes <strong>{displayMoney(cashPending)}</strong>
+                </span>
+              </>
+            ) : (
+              <>
+                <span>
+                  Saldo em contas <strong>{displayMoney(cash)}</strong>
+                </span>
+                <span title="Despesas pendentes e toda a dívida dos cartões.">
+                  Compromissos <strong>{displayMoney(cardDebt + cashPending)}</strong>
+                </span>
+              </>
+            )}
           </div>
         </article>
         <article className="metric-card">
@@ -126,7 +205,11 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
             <div className="section-head">
               <div>
                 <h2>Para onde foi seu dinheiro</h2>
-                <p>Despesas acumuladas em {monthLabel(month)}</p>
+                <p>
+                  {selectedAccount
+                    ? `Despesas de ${selectedAccount.name} em ${monthLabel(month)}`
+                    : `Despesas acumuladas em ${monthLabel(month)}`}
+                </p>
               </div>
               <span className="mini-badge">
                 {categoryData.length} categorias
@@ -192,7 +275,7 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
               </div>
             ) : (
               <Empty
-                title="Ainda não há gastos neste mês."
+                title={selectedAccount ? `Ainda não há gastos em ${selectedAccount.name} neste mês.` : "Ainda não há gastos neste mês."}
                 text="Registre o próximo movimento para começar a enxergar seus padrões."
               />
             )}
@@ -201,7 +284,11 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
             <div className="section-head">
               <div>
                 <h2>Fluxo do mês</h2>
-                <p>Receitas e despesas acumuladas</p>
+                <p>
+                  {selectedAccount
+                    ? `Receitas e despesas de ${selectedAccount.name}`
+                    : "Receitas e despesas acumuladas"}
+                </p>
               </div>
               <div className="chart-legend">
                 <span>
@@ -291,7 +378,11 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
             <div className="section-head">
               <div>
                 <h2>Últimos lançamentos</h2>
-                <p>Um olhar rápido no seu mês</p>
+                <p>
+                  {selectedAccount
+                    ? `Movimentos de ${selectedAccount.name} em ${monthLabel(month)}`
+                    : "Um olhar rápido no seu mês"}
+                </p>
               </div>
               <button
                 className="text-button"
@@ -318,7 +409,11 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
             <div className="section-head">
               <div>
                 <h2>Próximos compromissos</h2>
-                <p>Até os próximos 30 dias</p>
+                <p>
+                  {selectedAccount
+                    ? `Próximos compromissos de ${selectedAccount.name}`
+                    : "Até os próximos 30 dias"}
+                </p>
               </div>
               <CalendarDays size={18} />
             </div>
@@ -327,7 +422,11 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
             ) : (
               <div className="agenda-empty">
                 <CheckCircle2 size={24} />
-                <p>Nenhuma conta pendente por aqui.</p>
+                <p>
+                  {selectedAccount
+                    ? "Nenhum compromisso pendente nesta conta."
+                    : "Nenhuma conta pendente por aqui."}
+                </p>
               </div>
             )}
             <button
@@ -361,7 +460,12 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
           </section>
           {!focus && (<section className="panel secondary budget-overview">
             <div className="section-head">
-              <h2>De olho no orçamento</h2>
+              <div>
+                <h2>De olho no orçamento</h2>
+                {selectedAccount && (
+                  <p>Gastos desta conta frente aos limites gerais.</p>
+                )}
+              </div>
               <button
                 className="icon-button"
                 aria-label="Ver orçamentos"

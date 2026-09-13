@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  OverviewPage, TransactionsPage, filterTransactions, createEditor,
+  OverviewPage, TransactionsPage, overviewModel, transactionsForAccount, filterTransactions, createEditor,
   createUiSession, demoState, EMPTY,
 } from '../.sites-runtime/frontend-test.mjs';
 
@@ -33,6 +33,28 @@ test('Inactive overview panels are unmounted in focus mode and return when disab
   assert.match(focused, /spending-panel/);
   assert.match(focused, /recent-panel/);
   assert.match(render(OverviewPage, props()), /goals-overview/);
+});
+
+test('Overview can be scoped to one account without changing the consolidated view', () => {
+  const state = demoState(month);
+  const all = overviewModel(state, month);
+  const checking = overviewModel(state, month, 'a1');
+  const card = overviewModel(state, month, 'a3');
+
+  assert.equal(all.selectedAccount, undefined);
+  assert.equal(checking.selectedAccount?.id, 'a1');
+  assert.equal(checking.stats.income, 480000);
+  assert.equal(checking.stats.expense, 178010);
+  assert.equal(checking.cashPending, 22980);
+  assert.equal(checking.available, 426990);
+  assert.ok(checking.stats.tx.every(transaction => transaction.accountId === 'a1' || transaction.toId === 'a1'));
+  assert.ok(checking.agendaItems.every(item => item.accountId === 'a1'));
+  assert.deepEqual(transactionsForAccount(state, 'a3').map(transaction => transaction.id), ['t9', 't10']);
+  assert.equal(card.stats.expense, 34940);
+  assert.equal(card.selectedInvoice, 34940);
+  assert.equal(card.cardDebt, 34940);
+  assert.equal(card.available, 415060);
+  assert.ok(all.stats.expense > checking.stats.expense);
 });
 
 test('Transactions mount at most 50 records, including the last page and an out-of-range page', () => {

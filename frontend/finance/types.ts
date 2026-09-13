@@ -47,6 +47,7 @@ export type OnboardingData = {
 
 
 export type View = "overview" | "transactions" | "agenda" | "accounts" | "budgets" | "goals" | "categories";
+export const ALL_ACCOUNTS = "all";
 export type Deletion = { kind: FormKind; id: string; name: string };
 export type UiSession = { quick: string; transactions: { search: string; filter: string; page: number } };
 export type PageProps = {
@@ -54,6 +55,7 @@ export type PageProps = {
   openEditor: (kind: FormKind, record?: Entity, extra?: Record<string, string>) => void;
   askDelete: (kind: FormKind, id: string, name: string) => void;
   setView: (view: View) => void; start: () => void;
+  overviewAccountId?: string; setOverviewAccountId?: (accountId: string) => void;
   preference: (which: "focus" | "hidden", value: boolean) => void;
   uiSession: ReturnType<typeof createUiSession>; quickVersion: number;
 };
