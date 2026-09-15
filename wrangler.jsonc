@@ -1,0 +1,25 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "clareza",
+	"main": "dist/server/index.js",
+	"compatibility_date": "2026-05-15",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"workers_dev": true,
+	"vars": {
+		"ALLOW_PLATFORM_IDENTITY": "false"
+	},
+	"assets": {
+		"directory": "dist/client",
+		"binding": "ASSETS"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "clareza_db",
+			"database_id": "83ee49f9-7165-4b51-beab-aeab95ff1768",
+			"migrations_dir": "drizzle"
+		}
+	]
+}

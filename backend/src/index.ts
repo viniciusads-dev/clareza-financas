@@ -13,6 +13,7 @@ import {
 } from "../../shared/finance";
 export interface Env {
   DB: D1Database;
+  ALLOW_PLATFORM_IDENTITY?: string;
 }
 type AppUser = { id: string; email: string; name: string };
 const SESSION_COOKIE = "clareza_session";
@@ -647,8 +648,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       .filter(Boolean);
     if (path[0] === "auth") return await handleAuth(request, env, url, path);
     const sessionUser = env.DB ? await currentUser(env.DB, request) : null;
-    const owner =
-      sessionUser?.id ?? request.headers.get("oai-authenticated-user-id");
+    const platformOwner =
+      env.ALLOW_PLATFORM_IDENTITY === "true"
+        ? request.headers.get("oai-authenticated-user-id")
+        : null;
+    const owner = sessionUser?.id ?? platformOwner;
     if (!owner)
       throw new HttpError(
         401,
