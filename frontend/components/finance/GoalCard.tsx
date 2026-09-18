@@ -27,7 +27,9 @@ export default function GoalCard({ goal, hidden, openEditor, askDelete, canDelet
         >
           <Target size={20} />
         </span>
-        <span className="goal-percent">{percentage}%</span>
+        <span className="goal-percent" aria-label={hidden ? "Progresso oculto" : `Progresso em ${percentage}%`}>
+          {hidden ? "••" : `${percentage}%`}
+        </span>
       </div>
       <h3>{goal.name}</h3>
       <p>
@@ -35,7 +37,8 @@ export default function GoalCard({ goal, hidden, openEditor, askDelete, canDelet
         <span>de {displayMoney(goal.target)}</span>
       </p>
       <Progress
-        value={percentage}
+        value={hidden ? 0 : percentage}
+        aria-label={hidden ? "Progresso oculto" : `Progresso em ${percentage}%`}
         style={{ "--progress-color": goal.color } as CSSProperties}
       />
       <div className="goal-smart">

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  OverviewPage, TransactionsPage, overviewModel, transactionsForAccount, filterTransactions, createEditor,
+  OverviewPage, TransactionsPage, AuthSessionError, parseNavigation, navigationSearch, overviewModel, transactionsForAccount, filterTransactions, createEditor,
   createUiSession, demoState, EMPTY,
 } from '../.sites-runtime/frontend-test.mjs';
 
@@ -35,6 +35,33 @@ test('Inactive overview panels are unmounted in focus mode and return when disab
   assert.match(render(OverviewPage, props()), /goals-overview/);
 });
 
+test('Privacy mode removes chart disclosures and masks ratios', () => {
+  const hidden = render(OverviewPage, { ...props(), hidden: true });
+  assert.equal((hidden.match(/privacy-chart-placeholder/g) ?? []).length, 2);
+  assert.match(hidden, /Gráfico oculto/);
+  assert.match(hidden, /Detalhes ocultos/);
+  assert.doesNotMatch(hidden, /recharts-tooltip-wrapper/);
+});
+
+test('CSV export explains that values remain real when the screen is hidden', () => {
+  const hidden = render(TransactionsPage, { ...props(), hidden: true });
+  assert.match(hidden, /O CSV inclui os valores reais/);
+  assert.match(hidden, /Exportar CSV com os valores reais/);
+});
+
+test('Session service failure exposes a retry action', () => {
+  const html = render(AuthSessionError, { message: 'Serviço temporariamente indisponível.', onRetry: noop });
+  assert.match(html, /Não foi possível verificar sua sessão/);
+  assert.match(html, /Serviço temporariamente indisponível/);
+  assert.match(html, /Tentar novamente/);
+});
+
+test('Navigation state is durable and excludes unsupported query values', () => {
+  assert.deepEqual(parseNavigation('?view=transactions&month=2026-02', '2026-09'), { view: 'transactions', month: '2026-02' });
+  assert.deepEqual(parseNavigation('?view=unknown&month=2026-13&search=secret', '2026-09'), { view: 'overview', month: '2026-09' });
+  assert.equal(navigationSearch('goals', '2026-09'), '?view=goals&month=2026-09');
+});
+
 test('Overview can be scoped to one account without changing the consolidated view', () => {
   const state = demoState(month);
   const all = overviewModel(state, month);
@@ -55,6 +82,22 @@ test('Overview can be scoped to one account without changing the consolidated vi
   assert.equal(card.cardDebt, 34940);
   assert.equal(card.available, 415060);
   assert.ok(all.stats.expense > checking.stats.expense);
+});
+
+test('Account scope only follows transfer destinations', () => {
+  const state = demoState(month);
+  const malformed = {
+    ...state.transactions[0],
+    id: 'malformed-destination',
+    type: 'expense',
+    accountId: 'a1',
+    toId: 'a3',
+  };
+  const scoped = transactionsForAccount(
+    { ...state, transactions: [malformed] },
+    'a3',
+  );
+  assert.deepEqual(scoped, []);
 });
 
 test('Transactions mount at most 50 records, including the last page and an out-of-range page', () => {

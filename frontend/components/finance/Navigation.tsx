@@ -1,4 +1,5 @@
 "use client";
+import { useEffect } from "react";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
 import { type AuthUser } from "@/frontend/api";
@@ -22,6 +23,9 @@ export default function Navigation({
   onLogout: () => void;
 }) {
   const { setOpenMobile } = useSidebar();
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [setOpenMobile, view]);
   const initials = user.name
     .trim()
     .split(/\s+/)

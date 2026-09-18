@@ -64,3 +64,6 @@ next-env.d.ts
 /work/
 
 *.tsbuildinfo
+
+# Local implementation planning (not published to GitHub)
+/IMPLEMENTATION_PHASES.md

@@ -1,5 +1,5 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Check, LoaderCircle, ShieldCheck } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -19,6 +19,7 @@ import TagPicker from "@/frontend/components/finance/TagPicker";
 
 export default function EditorDialog({ initial, state, refresh, onClose, onSaved }: { initial: Editor; state: State; refresh: () => Promise<void>; onClose: () => void; onSaved: () => void }) {
   const [editor, setEditor] = useState(initial); const [saving, setSaving] = useState(false); const [formError, setFormError] = useState("");
+  const idempotencyKey = useRef(crypto.randomUUID());
   const topLevelCategories = (type: "expense" | "income") => [
     ...(type === "income" ? incomeCategories : expenseCategories).map(
       (name) => ({ value: name, label: name }),
@@ -38,6 +39,7 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
       : [];
   };
   function field(key: string, value: string) {
+    if (editor?.values[key] !== value) idempotencyKey.current = crypto.randomUUID();
     setEditor((current) =>
       current
         ? { ...current, values: { ...current.values, [key]: value } }
@@ -143,7 +145,7 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
         editor.kind,
         editor.id ? "PUT" : "POST",
         data,
-        crypto.randomUUID(),
+        idempotencyKey.current,
         editor.id,
       );
       onClose();

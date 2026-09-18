@@ -94,9 +94,15 @@ export default function TransactionsPage({ state, month, hidden, demo, openEdito
               aria-label="Buscar lançamento"
             />
           </label>
-          <button className="secondary-button" onClick={exportCsv}>
+          <button
+            className="secondary-button"
+            onClick={exportCsv}
+            aria-label="Exportar CSV com os valores reais"
+            title="O CSV contém os valores reais, mesmo quando a tela oculta valores."
+          >
             <Download size={17} /> CSV
           </button>
+          <span className="export-note">O CSV inclui os valores reais.</span>
         </div>
       </div>
       {txSorted.length ? (

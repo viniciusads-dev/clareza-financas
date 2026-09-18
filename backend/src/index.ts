@@ -13,11 +13,13 @@ import {
 } from "../../shared/finance";
 export interface Env {
   DB: D1Database;
-  ALLOW_PLATFORM_IDENTITY?: string;
 }
 type AppUser = { id: string; email: string; name: string };
 const SESSION_COOKIE = "clareza_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const AUTH_RATE_WINDOW_MS = 60_000;
+const AUTH_RATE_LIMIT = 30;
+const authAttempts = new Map<string, { count: number; reset: number }>();
 // Cloudflare Workers limits PBKDF2 to 100,000 iterations.
 const PASSWORD_ITERATIONS = 100000;
 const encoder = new TextEncoder();
@@ -113,6 +115,23 @@ const schemas = {
     .strict(),
   tags: z.object({ name, color }).strict(),
 };
+const onboardingSchema = z
+  .object({
+    account: schemas.accounts,
+    income: z
+      .object({
+        title: name,
+        amount,
+        startMonth: month,
+        active: z.literal(false),
+        automatic: z.literal(false),
+        businessDayRule: z.literal("previous_business_day"),
+      })
+      .strict()
+      .optional(),
+    goal: schemas.goals.optional(),
+  })
+  .strict();
 class HttpError extends Error {
   constructor(
     public code: number,
@@ -185,6 +204,31 @@ function insertIfMissing(
       "INSERT OR IGNORE INTO finance_records (id, owner, kind, data, created) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(recordId, owner, kind, JSON.stringify(data), Date.now());
+}
+function idempotencyStatement(
+  db: D1Database,
+  requestId: string,
+  owner: string,
+  method: string,
+  path: string,
+  payloadHash: string,
+  status: number,
+  response: object,
+) {
+  return db
+    .prepare(
+      "INSERT INTO finance_requests (id, owner, created, method, path, payload_hash, status, response) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(
+      requestId,
+      owner,
+      Date.now(),
+      method,
+      path,
+      payloadHash,
+      status,
+      JSON.stringify(response),
+    );
 }
 async function syncRecurrences(db: D1Database, owner: string) {
   const { results } = await db
@@ -488,6 +532,24 @@ function sessionCookie(token: string, url: URL, maxAge = SESSION_TTL_SECONDS) {
 function clearSessionCookie(url: URL) {
   return sessionCookie("", url, 0);
 }
+function enforceAuthRateLimit(request: Request) {
+  const now = Date.now();
+  for (const [key, entry] of authAttempts) {
+    if (entry.reset <= now) authAttempts.delete(key);
+  }
+  const clientKey = request.headers.get("CF-Connecting-IP")?.trim() || "direct";
+  const current = authAttempts.get(clientKey);
+  if (!current || current.reset <= now) {
+    authAttempts.set(clientKey, { count: 1, reset: now + AUTH_RATE_WINDOW_MS });
+    return;
+  }
+  if (current.count >= AUTH_RATE_LIMIT)
+    throw new HttpError(
+      429,
+      "Muitas tentativas de acesso. Aguarde um minuto e tente novamente.",
+    );
+  current.count += 1;
+}
 function sameOrigin(request: Request, url: URL) {
   const origin = request.headers.get("origin");
   if (
@@ -561,6 +623,7 @@ async function handleAuth(
   }
   if (action !== "register" && action !== "login")
     throw new HttpError(404, "Rota não encontrada.");
+  enforceAuthRateLimit(request);
   const input = await body(request);
   const parsed = (
     action === "register" ? authSchemas.register : authSchemas.login
@@ -648,11 +711,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       .filter(Boolean);
     if (path[0] === "auth") return await handleAuth(request, env, url, path);
     const sessionUser = env.DB ? await currentUser(env.DB, request) : null;
-    const platformOwner =
-      env.ALLOW_PLATFORM_IDENTITY === "true"
-        ? request.headers.get("oai-authenticated-user-id")
-        : null;
-    const owner = sessionUser?.id ?? platformOwner;
+    const owner = sessionUser?.id;
     if (!owner)
       throw new HttpError(
         401,
@@ -681,12 +740,41 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (!key || !z.string().uuid().safeParse(key).success)
       throw new HttpError(400, "Chave de operação inválida.");
     const requestId = owner + ":" + key;
+    const input = request.method === "DELETE" ? undefined : await body(request);
+    const payloadHash = await digestText(
+      request.method === "DELETE" ? "" : JSON.stringify(input),
+    );
     const prior = await env.DB.prepare(
-      "SELECT id FROM finance_requests WHERE id = ? AND owner = ?",
+      "SELECT method, path, payload_hash, status, response FROM finance_requests WHERE id = ? AND owner = ?",
     )
       .bind(requestId, owner)
-      .first();
-    if (prior) return json({ ok: true, replayed: true });
+      .first<{
+        method?: string;
+        path?: string;
+        payload_hash?: string;
+        status?: number;
+        response?: string;
+      }>();
+    if (prior) {
+      if (
+        prior.method &&
+        (prior.method !== request.method ||
+          prior.path !== url.pathname ||
+          prior.payload_hash !== payloadHash)
+      )
+        throw new HttpError(
+          409,
+          "Esta chave de operação já foi usada para outro pedido.",
+        );
+      if (prior.response && prior.status) {
+        try {
+          return json(JSON.parse(prior.response), prior.status);
+        } catch {
+          // Fall through to the generic replay response for legacy rows.
+        }
+      }
+      return json({ ok: true, replayed: true });
+    }
     const recent = await env.DB.prepare(
       "SELECT COUNT(*) AS count FROM finance_requests WHERE owner = ? AND created > ?",
     )
@@ -697,6 +785,56 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         429,
         "Muitas alterações de uma vez. Aguarde um minuto.",
       );
+    if (path[0] === "onboarding") {
+      const parsed = onboardingSchema.safeParse(input);
+      if (!parsed.success)
+        throw new HttpError(
+          400,
+          parsed.error.issues
+            .map((i) => `${i.path.join(".")}: ${i.message}`)
+            .join("; "),
+        );
+      const accountId = crypto.randomUUID();
+      const created: Record<string, string> = { accountId };
+      const onboardingStatements: D1PreparedStatement[] = [
+        insert(env.DB, owner, "accounts", parsed.data.account, accountId),
+      ];
+      if (parsed.data.income) {
+        const incomePlanId = crypto.randomUUID();
+        created.incomePlanId = incomePlanId;
+        onboardingStatements.push(
+          insert(
+            env.DB,
+            owner,
+            "incomePlans",
+            parsed.data.income,
+            incomePlanId,
+          ),
+        );
+      }
+      if (parsed.data.goal) {
+        const goalId = crypto.randomUUID();
+        created.goalId = goalId;
+        onboardingStatements.push(
+          insert(env.DB, owner, "goals", parsed.data.goal, goalId),
+        );
+      }
+      const responsePayload = { ok: true, id: accountId, created };
+      onboardingStatements.push(
+        idempotencyStatement(
+          env.DB,
+          requestId,
+          owner,
+          request.method,
+          url.pathname,
+          payloadHash,
+          201,
+          responsePayload,
+        ),
+      );
+      await env.DB.batch(onboardingStatements);
+      return json(responsePayload, 201);
+    }
     const kind = path[0] as keyof typeof schemas;
     if (!Object.hasOwn(schemas, kind))
       throw new HttpError(404, "Recurso não encontrado.");
@@ -708,11 +846,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (request.method !== "POST" && !record)
       throw new HttpError(404, "Registro não encontrado.");
     const createdIds: string[] = [];
-    const statements: D1PreparedStatement[] = [
-      env.DB.prepare(
-        "INSERT INTO finance_requests (id, owner, created) VALUES (?, ?, ?)",
-      ).bind(requestId, owner, Date.now()),
-    ];
+    const statements: D1PreparedStatement[] = [];
     if (request.method === "DELETE") {
       if (
         kind === "accounts" &&
@@ -756,7 +890,6 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         ).bind(record!.id, owner, kind),
       );
     } else {
-      const input = await body(request);
       const parsed = schemas[kind].safeParse(input);
       if (!parsed.success)
         throw new HttpError(
@@ -770,6 +903,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         const t = schemas.transactions.parse(data);
         const account = state.accounts.find((a) => a.id === t.accountId);
         if (!account) throw new HttpError(400, "Escolha uma conta válida.");
+        if (t.type !== "transfer" && (t.toId || t.invoiceMonth))
+          throw new HttpError(
+            400,
+            "Referências de destino e fatura só podem ser usadas em transferências.",
+          );
         if (t.type === "transfer") {
           const dest = state.accounts.find((a) => a.id === t.toId);
           if (!dest || dest.id === account.id || account.kind === "credit")
@@ -986,11 +1124,25 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         }
       }
     }
-    await env.DB.batch(statements);
-    return json(
-      { ok: true, ...(createdIds[0] ? { id: createdIds[0] } : {}) },
-      request.method === "POST" ? 201 : 200,
+    const responseStatus = request.method === "POST" ? 201 : 200;
+    const responsePayload = {
+      ok: true,
+      ...(createdIds[0] ? { id: createdIds[0] } : {}),
+    };
+    statements.push(
+      idempotencyStatement(
+        env.DB,
+        requestId,
+        owner,
+        request.method,
+        url.pathname,
+        payloadHash,
+        responseStatus,
+        responsePayload,
+      ),
     );
+    await env.DB.batch(statements);
+    return json(responsePayload, responseStatus);
   } catch (error) {
     if (error instanceof HttpError)
       return json({ error: error.message }, error.code);

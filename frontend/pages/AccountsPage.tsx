@@ -157,19 +157,18 @@ export default function AccountsPage({ state, month, hidden, openEditor, askDele
                     <strong>{displayMoney(account.limit)}</strong>
                   </span>
                   <Progress
-                    value={
-                      account.limit
-                        ? Math.min(
-                          100,
-                          (Math.max(
-                            0,
-                            -(balancesByAccount[account.id] ?? 0),
-                          ) /
-                            account.limit) *
-                          100,
-                        )
-                        : 0
-                    }
+                    value={hidden ? 0 : account.limit
+                      ? Math.min(
+                        100,
+                        (Math.max(
+                          0,
+                          -(balancesByAccount[account.id] ?? 0),
+                        ) /
+                          account.limit) *
+                        100,
+                      )
+                      : 0}
+                    aria-label={hidden ? "Utilização do limite oculto" : "Utilização do limite"}
                   />
                   <div className="row-actions">
                     <button

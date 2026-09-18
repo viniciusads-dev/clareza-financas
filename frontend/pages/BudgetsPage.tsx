@@ -97,7 +97,8 @@ export default function BudgetsPage({ state, month, hidden, openEditor, askDelet
                 <span>de {displayMoney(budget.amount)}</span>
               </div>
               <Progress
-                value={Math.min(100, percentage)}
+                value={hidden ? 0 : Math.min(100, percentage)}
+                aria-label={hidden ? "Progresso oculto" : `Orçamento em ${percentage}%`}
                 style={
                   {
                     "--progress-color":

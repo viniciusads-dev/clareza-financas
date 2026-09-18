@@ -16,7 +16,8 @@ export function transactionsForAccount(state: State, accountId: string) {
   if (accountId === ALL_ACCOUNTS) return state.transactions;
   return state.transactions.filter(
     (transaction) =>
-      transaction.accountId === accountId || transaction.toId === accountId,
+      transaction.accountId === accountId ||
+      (transaction.type === "transfer" && transaction.toId === accountId),
   );
 }
 

@@ -85,7 +85,7 @@ export default function LoginScreen({onAuthenticated}:{onAuthenticated:(user:Aut
               <div className="login-control"><Check size={16}/><strong>Começo rápido</strong><span>Cadastre e registre o primeiro passo.</span></div>
               <div className="login-control"><ShieldCheck size={16}/><strong>Dados protegidos</strong><span>Senha protegida e sessão privada.</span></div>
             </div>
-            <p className="login-legal">Você pode sair ou excluir seus dados quando quiser. <a href="/privacidade">Saiba mais sobre privacidade</a>.</p>
+            <p className="login-legal">Você pode sair da conta quando quiser. A exclusão de dados ainda não está disponível no painel. <a href="/privacidade">Saiba mais sobre privacidade</a>.</p>
           </div>
           <footer className="login-footer"><span>© 2026 Clareza</span><span className="login-footer-separator" aria-hidden="true"/> <a href="/privacidade">Privacidade e LGPD</a></footer>
         </div>

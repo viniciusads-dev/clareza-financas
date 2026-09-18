@@ -23,6 +23,19 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
   function displayMoney(value: number) {
     return hidden ? "R$ •••••" : brl(value);
   }
+  function privacyChart(label: string, className = "") {
+    return (
+      <div
+        className={`privacy-chart-placeholder ${className}`.trim()}
+        role="img"
+        aria-label={`${label}. Valores ocultos enquanto a proteção estiver ativa.`}
+      >
+        <EyeOff size={18} aria-hidden="true" />
+        <span>Gráfico oculto</span>
+        <small>Mostre os valores para visualizar os detalhes.</small>
+      </div>
+    );
+  }
   const categoryColor = (name: string) => categoryColorFor(state, name);
   const selectedAccountId = overviewAccountId ?? ALL_ACCOUNTS;
   const updateAccount = setOverviewAccountId ?? (() => {});
@@ -212,34 +225,36 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
                 </p>
               </div>
               <span className="mini-badge">
-                {categoryData.length} categorias
+                {hidden ? "Detalhes ocultos" : `${categoryData.length} categorias`}
               </span>
             </div>
             {categoryData.length ? (
-              <div className="spending-content">
-                <div className="donut-wrapper">
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie
-                        data={categoryData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={68}
-                        outerRadius={95}
-                        paddingAngle={3}
-                      >
-                        {categoryData.map((category) => (
-                          <Cell
-                            key={category.name}
-                            fill={categoryColor(category.name)}
+                <div className="spending-content">
+                  <div className="donut-wrapper">
+                    {hidden ? privacyChart("Despesas por categoria") : (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={categoryData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius={68}
+                            outerRadius={95}
+                            paddingAngle={3}
+                          >
+                            {categoryData.map((category) => (
+                              <Cell
+                                key={category.name}
+                                fill={categoryColor(category.name)}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value) => brl(Number(value))}
                           />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value) => brl(Number(value))}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
                   <div className="donut-center">
                     <span>Total</span>
                     <strong>{displayMoney(stats.expense)}</strong>
@@ -262,12 +277,9 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
                         {displayMoney(category.value)}
                       </strong>
                       <small>
-                        {Math.round(
-                          (category.value /
-                            Math.max(1, stats.expense)) *
-                          100,
-                        )}
-                        %
+                        {hidden ? "••" : `${Math.round(
+                          (category.value / Math.max(1, stats.expense)) * 100,
+                        )}%`}
                       </small>
                     </div>
                   ))}
@@ -301,78 +313,28 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
                 </span>
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={190}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient
-                    id="incomeFill"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor="#65b589"
-                      stopOpacity={0.25}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="#65b589"
-                      stopOpacity={0}
-                    />
-                  </linearGradient>
-                  <linearGradient
-                    id="expenseFill"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor="#dba66e"
-                      stopOpacity={0.2}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="#dba66e"
-                      stopOpacity={0}
-                    />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid vertical={false} stroke="#edf1ed" />
-                <XAxis
-                  dataKey="day"
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 10, fill: "#9aa69b" }}
-                  interval={4}
-                />
-                <YAxis hide />
-                <Tooltip
-                  formatter={(value) =>
-                    brl(Math.round(Number(value) * 100))
-                  }
-                />
-                <Area
-                  type="monotone"
-                  dataKey="income"
-                  stroke="#57ab7d"
-                  fill="url(#incomeFill)"
-                  strokeWidth={2}
-                  name="Receitas"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="expense"
-                  stroke="#d8a165"
-                  fill="url(#expenseFill)"
-                  strokeWidth={2}
-                  name="Despesas"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {hidden ? privacyChart("Fluxo do mês", "flow-chart-placeholder") : (
+              <ResponsiveContainer width="100%" height={190}>
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id="incomeFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#65b589" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="#65b589" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="expenseFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#dba66e" stopOpacity={0.2} />
+                      <stop offset="100%" stopColor="#dba66e" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} stroke="#edf1ed" />
+                  <XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#9aa69b" }} interval={4} />
+                  <YAxis hide />
+                  <Tooltip formatter={(value) => brl(Math.round(Number(value) * 100))} />
+                  <Area type="monotone" dataKey="income" stroke="#57ab7d" fill="url(#incomeFill)" strokeWidth={2} name="Receitas" />
+                  <Area type="monotone" dataKey="expense" stroke="#d8a165" fill="url(#expenseFill)" strokeWidth={2} name="Despesas" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </section>
           <section className="panel recent-panel">
             <div className="section-head">
@@ -487,10 +449,11 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
                   <div className="budget-mini" key={budget.id}>
                     <div>
                       <span>{budget.category}</span>
-                      <strong>{percentage}%</strong>
+                      <strong>{hidden ? "••" : `${percentage}%`}</strong>
                     </div>
                     <Progress
-                      value={Math.min(100, percentage)}
+                      value={hidden ? 0 : Math.min(100, percentage)}
+                      aria-label={hidden ? "Progresso oculto" : `Orçamento em ${percentage}%`}
                       style={
                         {
                           "--progress-color":

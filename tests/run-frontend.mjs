@@ -5,6 +5,8 @@ await build({
   stdin: {
     contents: `
       export {default as OverviewPage} from './frontend/pages/OverviewPage';
+      export {default as AuthSessionError} from './frontend/components/finance/AuthSessionError';
+      export {parseNavigation, navigationSearch} from './frontend/finance/navigation';
       export {overviewModel, transactionsForAccount} from './frontend/pages/overview-model';
       export {default as TransactionsPage} from './frontend/pages/TransactionsPage';
       export {filterTransactions} from './frontend/finance/transactions';

@@ -1,5 +1,5 @@
 "use client";
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { today } from "@/shared/finance";
 import { toast } from "sonner";
 import { logout as authLogout, type AuthUser } from "./api";
@@ -8,6 +8,7 @@ import PageLoading from "./components/finance/PageLoading";
 import { createEditor } from "./finance/editor";
 import { ALL_ACCOUNTS, type Deletion, type Editor, type PageProps, type View } from "./finance/types";
 import { createUiSession } from "./finance/ui-session";
+import { navigationSearch, parseNavigation } from "./finance/navigation";
 import { useFinanceData } from "./hooks/useFinanceData";
 
 const pages = {
@@ -29,6 +30,42 @@ function readPreference(which: "focus" | "hidden") {
 export default function FinanceApp({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [view, setView] = useState<View>("overview");
   const [month, setMonth] = useState(today().slice(0, 7));
+  const navigationReady = useRef(false);
+  useEffect(() => {
+    const fallbackMonth = today().slice(0, 7);
+    const initial = parseNavigation(window.location.search, fallbackMonth);
+    // URL state is external state; hydrate the client shell once after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setView(initial.view);
+    setMonth(initial.month);
+    const canonical = `${window.location.pathname}${navigationSearch(initial.view, initial.month)}`;
+    if (`${window.location.pathname}${window.location.search}` !== canonical)
+      window.history.replaceState({ view: initial.view, month: initial.month }, "", canonical);
+    const onPopState = () => {
+      const next = parseNavigation(window.location.search, fallbackMonth);
+      setView(next.view);
+      setMonth(next.month);
+    };
+    window.addEventListener("popstate", onPopState);
+    navigationReady.current = true;
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  const navigateView = useCallback((next: View) => {
+    setView(next);
+    if (navigationReady.current) {
+      const url = `${window.location.pathname}${navigationSearch(next, month)}`;
+      if (`${window.location.pathname}${window.location.search}` !== url)
+        window.history.pushState({ view: next, month }, "", url);
+    }
+  }, [month]);
+  const navigateMonth = useCallback((next: string) => {
+    setMonth(next);
+    if (navigationReady.current) {
+      const url = `${window.location.pathname}${navigationSearch(view, next)}`;
+      if (`${window.location.pathname}${window.location.search}` !== url)
+        window.history.pushState({ view, month: next }, "", url);
+    }
+  }, [view]);
   const [focus, setFocus] = useState(() => readPreference("focus"));
   const [hidden, setHidden] = useState(() => readPreference("hidden"));
   const { state, real, demo, setDemo, loading, loadError, refresh } = useFinanceData(month);
@@ -81,7 +118,7 @@ export default function FinanceApp({ user, onLogout }: { user: AuthUser; onLogou
   }, [uiSession]);
   const Page = pages[view];
   return (
-    <FinanceLayout {...{ view, setView, focus, hidden, preference, user, signOut, month, setMonth, demo, start, openEditor: openEditorForContext }}
+    <FinanceLayout {...{ view, setView: navigateView, focus, hidden, preference, user, signOut, month, setMonth: navigateMonth, demo, start, openEditor: openEditorForContext }}
       dialogs={<Suspense fallback={<span role="status" className="sr-only">Carregando formulário…</span>}>
         {editor && <EditorDialog initial={editor} state={state} refresh={refresh} onClose={() => setEditor(null)} onSaved={onSaved} />}
         {onboardingOpen && <OnboardingDialog refresh={refresh} onClose={() => setOnboardingOpen(false)} onComplete={() => setDemo(false)} />}
@@ -95,7 +132,7 @@ export default function FinanceApp({ user, onLogout }: { user: AuthUser; onLogou
         </div>
       ) : loading ? <PageLoading /> : (
         <Suspense fallback={<PageLoading />}>
-          <Page {...{ state, month, hidden, focus, demo, openEditor: openEditorForContext, askDelete, setView, start, preference, uiSession, quickVersion, overviewAccountId, setOverviewAccountId }} />
+          <Page {...{ state, month, hidden, focus, demo, openEditor: openEditorForContext, askDelete, setView: navigateView, start, preference, uiSession, quickVersion, overviewAccountId, setOverviewAccountId }} />
         </Suspense>
       )}
     </FinanceLayout>

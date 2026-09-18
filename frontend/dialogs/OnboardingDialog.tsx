@@ -1,5 +1,5 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { ArrowRight, Check, LoaderCircle, ShieldCheck, Target, TrendingUp } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,7 +16,9 @@ import Picker from "@/frontend/components/finance/Picker";
 
 export default function OnboardingDialog({ refresh, onClose, onComplete }: { refresh: () => Promise<void>; onClose: () => void; onComplete: () => void }) {
 const [saving, setSaving] = useState(false); const [onboardingStep, setOnboardingStep] = useState(1); const [onboardingError, setOnboardingError] = useState(""); const [onboarding, setOnboarding] = useState<OnboardingData>({ accountName: "Conta principal", accountKind: "checking", opening: "", income: "", goalName: "", goalTarget: "", goalDate: addMonths(today(), 6) });
+  const idempotencyKey = useRef(crypto.randomUUID());
   function updateOnboarding(key: keyof OnboardingData, value: string) {
+    if (onboarding[key] !== value) idempotencyKey.current = crypto.randomUUID();
     setOnboarding((current) => ({ ...current, [key]: value }));
     setOnboardingError("");
   }
@@ -28,54 +30,52 @@ const [saving, setSaving] = useState(false); const [onboardingStep, setOnboardin
     try {
       if (!onboarding.accountName.trim())
         throw new Error("Informe o nome da sua primeira conta.");
-      const accountResult = await mutate(
-        "accounts",
-        "POST",
-        {
-          name: onboarding.accountName,
-          kind: onboarding.accountKind,
-          opening: money(onboarding.opening || "0"),
-          color: colors[0],
-          limit: 0,
-          closing: 5,
-          due: 12,
-        },
-        crypto.randomUUID(),
-      );
-      if (!accountResult.id)
-        throw new Error("Não conseguimos criar sua primeira conta.");
-      if (onboarding.income.trim())
-        await mutate(
-          "incomePlans",
-          "POST",
-          {
-            title: "Renda mensal",
-            amount: money(onboarding.income),
-            startMonth: today().slice(0, 7),
-            active: false,
-            automatic: false,
-            businessDayRule: "previous_business_day",
-          },
-          crypto.randomUUID(),
-        );
+      const hasGoal = onboarding.goalName.trim() || onboarding.goalTarget.trim();
       if (onboarding.goalName.trim() || onboarding.goalTarget.trim()) {
         if (!onboarding.goalName.trim() || !onboarding.goalTarget.trim())
           throw new Error(
             "Preencha o nome e o valor da meta, ou deixe os dois campos vazios.",
           );
-        await mutate(
-          "goals",
-          "POST",
-          {
-            name: onboarding.goalName,
-            target: money(onboarding.goalTarget),
-            saved: 0,
-            date: onboarding.goalDate,
-            color: colors[1],
-          },
-          crypto.randomUUID(),
-        );
       }
+      await mutate(
+        "onboarding",
+        "POST",
+        {
+          account: {
+            name: onboarding.accountName,
+            kind: onboarding.accountKind,
+            opening: money(onboarding.opening || "0"),
+            color: colors[0],
+            limit: 0,
+            closing: 5,
+            due: 12,
+          },
+          ...(onboarding.income.trim()
+            ? {
+              income: {
+                title: "Renda mensal",
+                amount: money(onboarding.income),
+                startMonth: today().slice(0, 7),
+                active: false,
+                automatic: false,
+                businessDayRule: "previous_business_day" as const,
+              },
+            }
+            : {}),
+          ...(hasGoal
+            ? {
+              goal: {
+                name: onboarding.goalName,
+                target: money(onboarding.goalTarget),
+                saved: 0,
+                date: onboarding.goalDate,
+                color: colors[1],
+              },
+            }
+            : {}),
+        },
+        idempotencyKey.current,
+      );
       onClose();
       onComplete();
       toast.success("Seu espaço está pronto. Vamos dar o próximo passo!");
