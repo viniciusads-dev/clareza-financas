@@ -1,16 +1,286 @@
 "use client";
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { ArrowRight, ArrowUpRight, CreditCard, Info, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
 
-import { balances, brl, creditCardInvoiceSummary, today } from "@/shared/finance";
+import { balances, brl, cardInvoiceForPurchaseDate, cardInvoicesFor, today, type Account, type CardInvoice, type State } from "@/shared/finance";
 
 import { monthLabel } from "@/frontend/finance/presentation";
 import type { PageProps } from "@/frontend/finance/types";
 import Empty from "@/frontend/components/finance/Empty";
+import TransactionTable from "@/frontend/components/finance/TransactionTable";
 
-export default function AccountsPage({ state, month, hidden, openEditor, askDelete, start, setView, setOverviewAccountId }: Pick<PageProps, "state" | "month" | "hidden" | "openEditor" | "askDelete" | "start" | "setView" | "setOverviewAccountId">) {
+function dayMonth(date: string) {
+  return new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
+
+function statusLabel(status: CardInvoice["status"]) {
+  return status === "paid" ? "Paga" : status === "overdue" ? "Vencida" : status === "closed" ? "Fechada" : "Em formação";
+}
+
+function CreditCardPanel({
+  state,
+  account,
+  totalDebt,
+  hidden,
+  openEditor,
+  askDelete,
+  setView,
+  setOverviewAccountId,
+}: {
+  state: State;
+  account: Account;
+  totalDebt: number;
+  hidden: boolean;
+  openEditor: PageProps["openEditor"];
+  askDelete: PageProps["askDelete"];
+  setView: PageProps["setView"];
+  setOverviewAccountId: PageProps["setOverviewAccountId"];
+}) {
+  const invoices = useMemo(() => cardInvoicesFor(state, account), [state, account]);
+  const currentId = cardInvoiceForPurchaseDate(account, today()).id;
+  const [selectedId, setSelectedId] = useState(currentId);
+  const selectedIndex = invoices.findIndex((invoice) => invoice.id === selectedId);
+  const currentIndex = invoices.findIndex((invoice) => invoice.id === currentId);
+  const invoice = invoices[selectedIndex >= 0 ? selectedIndex : Math.max(0, currentIndex)];
+  const target = account.monthlyTarget ?? 0;
+  const remainingToTarget = Math.max(0, target - invoice.spent);
+  const targetProgress = target
+    ? Math.min(100, (invoice.spent / target) * 100)
+    : 0;
+  const comparison = invoice.previousSpent === 0
+    ? invoice.spent > 0
+      ? "Sem fatura anterior para comparar"
+      : "Sem movimento na fatura anterior"
+    : invoice.spent > invoice.previousSpent
+      ? `${hidden ? "Valor oculto" : brl(invoice.spent - invoice.previousSpent)} a mais que na anterior`
+      : invoice.spent < invoice.previousSpent
+        ? `${hidden ? "Valor oculto" : brl(invoice.previousSpent - invoice.spent)} a menos que na anterior`
+        : "Mesmo valor da fatura anterior";
+  const targetMessage = hidden
+    ? "Mostre os valores para acompanhar sua meta por fatura."
+    : invoice.spent > target
+      ? `Você passou ${brl(invoice.spent - target)} da meta escolhida.`
+      : invoice.spent === target
+        ? "Você chegou à meta planejada nesta fatura."
+        : `${brl(remainingToTarget)} até sua meta por fatura.`;
+  const futureCommitted = invoices
+    .filter((item) => item.periodEnd > invoice.periodEnd)
+    .reduce((sum, item) => sum + item.projectedOutstanding, 0);
+  const currentLabel = invoice.id === currentId
+    ? "Fatura atual"
+    : invoice.periodEnd < cardInvoiceForPurchaseDate(account, today()).periodEnd
+      ? "Faturas anteriores"
+      : "Próxima fatura";
+  const currentYear = today().slice(0, 4);
+  const dueDate = invoice.dueDate.slice(0, 4) === currentYear
+    ? dayMonth(invoice.dueDate)
+    : new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "2-digit",
+      });
+  const bankUse = account.limit
+    ? Math.min(100, (totalDebt / account.limit) * 100)
+    : 0;
+
+  return (
+    <article className="panel credit-container" key={account.id}>
+      <div
+        className="credit-learning-header"
+        style={{ "--credit-accent": account.color } as CSSProperties}
+      >
+        <div>
+          <span>{currentLabel} · Fatura de {monthLabel(invoice.dueMonth)}</span>
+          <strong>{account.name}</strong>
+        </div>
+        <div className="credit-learning-due">
+          <CreditCard size={22} aria-hidden="true" />
+          <small>Vencimento: {dueDate}</small>
+        </div>
+      </div>
+      <div className="credit-info">
+        <div className="credit-invoice-navigation">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={selectedIndex <= 0}
+            onClick={() => setSelectedId(invoices[Math.max(0, selectedIndex - 1)]?.id ?? currentId)}
+          >
+            Fatura anterior
+          </button>
+          <label className="field">
+            <span>Selecionar fatura</span>
+            <select
+              value={invoice.id}
+              onChange={(event) => setSelectedId(event.target.value)}
+            >
+              {[...invoices].reverse().map((item) => (
+                <option value={item.id} key={item.id}>
+                  Fatura de {monthLabel(item.dueMonth)} · {dayMonth(item.periodStart)}–{dayMonth(item.periodEnd)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={selectedIndex < 0 || selectedIndex >= invoices.length - 1}
+            onClick={() => setSelectedId(invoices[Math.min(invoices.length - 1, selectedIndex + 1)]?.id ?? currentId)}
+          >
+            Próxima fatura
+          </button>
+          <span className={`credit-invoice-status ${invoice.status}`}>
+            {statusLabel(invoice.status)}
+          </span>
+        </div>
+        <p className="credit-invoice-period">
+          Período da fatura: {dayMonth(invoice.periodStart)}–{dayMonth(invoice.periodEnd)}
+          {invoice.periodStart.slice(0, 4) !== invoice.periodEnd.slice(0, 4)
+            ? `/${invoice.periodStart.slice(0, 4)}–${invoice.periodEnd.slice(0, 4)}`
+            : `/${invoice.periodEnd.slice(0, 4)}`}
+        </p>
+        <div className="credit-spent-primary">
+          <span>Compras nesta fatura</span>
+          <strong>{hidden ? "R$ •••••" : brl(invoice.spent)}</strong>
+        </div>
+
+        <section className="credit-personal-target" aria-label="Meta pessoal por fatura">
+          {target > 0 ? (
+            <>
+              <div className="credit-target-values">
+                <span>Meta pessoal por fatura</span>
+                <strong>{hidden ? "R$ •••••" : brl(target)}</strong>
+              </div>
+              <Progress
+                value={hidden ? 0 : targetProgress}
+                aria-label={hidden ? "Progresso da meta oculto" : "Progresso da meta por fatura"}
+                className={invoice.spent > target ? "credit-target-progress over" : "credit-target-progress"}
+              />
+              <p>{targetMessage}</p>
+            </>
+          ) : (
+            <div className="credit-no-target">
+              <p>Escolha quanto deseja gastar por fatura para criar uma referência pessoal.</p>
+              <button className="text-button" onClick={() => openEditor("accounts", account)}>
+                Definir meta de gastos <ArrowRight size={15} />
+              </button>
+            </div>
+          )}
+        </section>
+
+        <div className="credit-learning-metrics">
+          <div>
+            <span>Em relação à fatura anterior</span>
+            <strong>{hidden ? "Valores ocultos" : comparison}</strong>
+          </div>
+          <div>
+            <span>Pago até hoje</span>
+            <strong>{hidden ? "R$ •••••" : brl(invoice.paid)}</strong>
+          </div>
+          <div>
+            <span>Em aberto</span>
+            <strong>{hidden ? "R$ •••••" : brl(invoice.outstanding)}</strong>
+          </div>
+          <div>
+            <span>Pagamento agendado</span>
+            <strong>{hidden ? "R$ •••••" : brl(invoice.scheduledPayment)}</strong>
+          </div>
+          <div>
+            <span>Saldo previsto após agendamento</span>
+            <strong>{hidden ? "R$ •••••" : brl(invoice.projectedOutstanding)}</strong>
+          </div>
+          <div>
+            <span>Compromissos em faturas futuras</span>
+            <strong>{hidden ? "R$ •••••" : brl(futureCommitted)}</strong>
+          </div>
+        </div>
+
+        {invoice.topCategory && (
+          <p className="credit-category-insight">
+            Maior categoria: <strong>{hidden ? "Oculta" : invoice.topCategory.name}</strong>
+            <span>{hidden ? "Valores ocultos" : brl(invoice.topCategory.amount)}</span>
+          </p>
+        )}
+
+        <details className="credit-invoice-purchases" open={invoice.purchases.length > 0}>
+          <summary>Compras desta fatura ({invoice.purchases.length})</summary>
+          {invoice.purchases.length ? (
+            <TransactionTable
+              rows={invoice.purchases}
+              state={state}
+              hidden={hidden}
+              openEditor={openEditor}
+              askDelete={askDelete}
+            />
+          ) : (
+            <p>Nenhuma compra associada a esta fatura.</p>
+          )}
+        </details>
+
+        <details className="credit-bank-limit">
+          <summary>
+            Limite concedido pelo banco
+            <strong>{hidden ? "R$ •••••" : brl(account.limit)}</strong>
+          </summary>
+          <div>
+            <span>Uso total considerado no cartão</span>
+            <strong>{hidden ? "R$ •••••" : brl(totalDebt)}</strong>
+          </div>
+          <Progress
+            value={hidden ? 0 : bankUse}
+            aria-label={hidden ? "Uso do limite bancário oculto" : "Uso do limite bancário"}
+            className="credit-bank-progress"
+          />
+        </details>
+
+        <div className="row-actions credit-actions">
+          <button
+            className="text-button"
+            onClick={() => {
+              setOverviewAccountId?.(account.id);
+              setView("overview");
+            }}
+          >
+            Analisar gastos <ArrowRight size={15} />
+          </button>
+          <button
+            className="text-button"
+            disabled={invoice.projectedOutstanding <= 0}
+            onClick={() =>
+              openEditor("transactions", undefined, {
+                type: "transfer",
+                toId: account.id,
+                title: `Pagamento · ${account.name}`,
+                invoiceMonth: invoice.dueMonth,
+                cardInvoiceId: invoice.id,
+                cardInvoicePeriodStart: invoice.periodStart,
+                cardInvoicePeriodEnd: invoice.periodEnd,
+                cardInvoiceDueDate: invoice.dueDate,
+                amount: (invoice.projectedOutstanding / 100).toFixed(2).replace(".", ","),
+                date: today(),
+              })
+            }
+          >
+            {invoice.projectedOutstanding > 0 ? "Registrar pagamento" : "Fatura coberta"} <ArrowUpRight size={16} />
+          </button>
+          <button className="icon-button" aria-label={`Editar ${account.name}`} onClick={() => openEditor("accounts", account)}>
+            <Pencil size={16} />
+          </button>
+          <button className="icon-button" aria-label={`Excluir ${account.name}`} onClick={() => askDelete("accounts", account.id, account.name)}>
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export default function AccountsPage({ state, hidden, openEditor, askDelete, start, setView, setOverviewAccountId }: Pick<PageProps, "state" | "hidden" | "openEditor" | "askDelete" | "start" | "setView" | "setOverviewAccountId">) {
   function displayMoney(value: number) {
     return hidden ? "R$ •••••" : brl(value);
   }
@@ -21,10 +291,9 @@ export default function AccountsPage({ state, month, hidden, openEditor, askDele
       .filter((account) => account.kind === "credit")
       .map((account) => ({
         account,
-        summary: creditCardInvoiceSummary(state, account.id, month),
         totalDebt: Math.max(0, -(balancesByAccount[account.id] ?? 0)),
       })),
-    [state, month, balancesByAccount],
+    [state.accounts, balancesByAccount],
   );
   return (
     <>
@@ -122,182 +391,19 @@ export default function AccountsPage({ state, month, hidden, openEditor, askDele
         </button>
       </div>
       <div className="account-grid">
-        {creditCards.map(({ account, summary, totalDebt }) => {
-          const target = account.monthlyTarget ?? 0;
-          const remainingToTarget = Math.max(0, target - summary.spent);
-          const targetProgress = target
-            ? Math.min(100, (summary.spent / target) * 100)
-            : 0;
-          const comparison = summary.previousSpent === 0
-            ? summary.spent > 0
-              ? "Sem fatura anterior para comparar"
-              : "Sem movimento na fatura anterior"
-            : summary.change > 0
-              ? `${displayMoney(summary.change)} a mais que na anterior`
-              : summary.change < 0
-                ? `${displayMoney(Math.abs(summary.change))} a menos que na anterior`
-                : "Mesmo valor da fatura anterior";
-          const targetMessage = hidden
-            ? "Mostre os valores para acompanhar sua meta pessoal."
-            : summary.spent > target
-              ? `Você passou ${displayMoney(summary.spent - target)} da meta escolhida.`
-              : summary.spent === target
-                ? "Você chegou à meta planejada neste ciclo."
-                : targetProgress >= 80
-                  ? `Restam ${displayMoney(remainingToTarget)} até sua meta mensal.`
-                  : `${displayMoney(remainingToTarget)} até sua meta mensal.`;
-          const bankUse = account.limit
-            ? Math.min(100, (totalDebt / account.limit) * 100)
-            : 0;
-
-          return (
-            <article className="panel credit-container" key={account.id}>
-              <div
-                className="credit-learning-header"
-                style={{ "--credit-accent": account.color } as CSSProperties}
-              >
-                <div>
-                  <span>Fatura de {monthLabel(month)}</span>
-                  <strong>{account.name}</strong>
-                </div>
-                <div className="credit-learning-due">
-                  <CreditCard size={22} aria-hidden="true" />
-                  <small>Vence dia {account.due}</small>
-                </div>
-              </div>
-              <div className="credit-info">
-                <div className="credit-spent-primary">
-                  <span>Você gastou neste ciclo</span>
-                  <strong>{displayMoney(summary.spent)}</strong>
-                </div>
-
-                <section className="credit-personal-target" aria-label="Meta pessoal mensal">
-                  {target > 0 ? (
-                    <>
-                      <div className="credit-target-values">
-                        <span>Meta pessoal do mês</span>
-                        <strong>{displayMoney(target)}</strong>
-                      </div>
-                      <Progress
-                        value={hidden ? 0 : targetProgress}
-                        aria-label={hidden ? "Progresso da meta oculto" : "Progresso da meta pessoal mensal"}
-                        className={summary.spent > target ? "credit-target-progress over" : "credit-target-progress"}
-                      />
-                      <p>{targetMessage}</p>
-                    </>
-                  ) : (
-                    <div className="credit-no-target">
-                      <p>Escolha quanto deseja gastar por mês para criar uma referência pessoal.</p>
-                      <button
-                        className="text-button"
-                        onClick={() => openEditor("accounts", account)}
-                      >
-                        Definir meta mensal <ArrowRight size={15} />
-                      </button>
-                    </div>
-                  )}
-                </section>
-
-                <div className="credit-learning-metrics">
-                  <div>
-                    <span>Em relação à fatura anterior</span>
-                    <strong>{hidden ? "Valores ocultos" : comparison}</strong>
-                  </div>
-                  <div>
-                    <span>Já pago</span>
-                    <strong>{displayMoney(summary.paid)}</strong>
-                  </div>
-                  <div>
-                    <span>Falta pagar desta fatura</span>
-                    <strong>{displayMoney(summary.outstanding)}</strong>
-                  </div>
-                  <div>
-                    <span>Compromissos em faturas futuras</span>
-                    <strong>{displayMoney(summary.futureCommitted)}</strong>
-                  </div>
-                </div>
-
-                {summary.topCategory && (
-                  <p className="credit-category-insight">
-                    Maior categoria: <strong>{hidden ? "Oculta" : summary.topCategory.name}</strong>
-                    <span>{hidden ? "Valores ocultos" : displayMoney(summary.topCategory.amount)}</span>
-                  </p>
-                )}
-
-                {summary.upcomingInvoices.length > 0 && (
-                  <details className="credit-upcoming-detail">
-                    <summary>Ver próximas faturas</summary>
-                    <div>
-                      {summary.upcomingInvoices.map((invoice) => (
-                        <span key={invoice.month}>
-                          {monthLabel(invoice.month)}
-                          <strong>{displayMoney(invoice.outstanding)}</strong>
-                        </span>
-                      ))}
-                    </div>
-                  </details>
-                )}
-
-                <details className="credit-bank-limit">
-                  <summary>
-                    Limite concedido pelo banco
-                    <strong>{displayMoney(account.limit)}</strong>
-                  </summary>
-                  <div>
-                    <span>Uso total considerado no cartão</span>
-                    <strong>{displayMoney(totalDebt)}</strong>
-                  </div>
-                  <Progress
-                    value={hidden ? 0 : bankUse}
-                    aria-label={hidden ? "Uso do limite bancário oculto" : "Uso do limite bancário"}
-                    className="credit-bank-progress"
-                  />
-                </details>
-
-                <div className="row-actions credit-actions">
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      setOverviewAccountId?.(account.id);
-                      setView("overview");
-                    }}
-                  >
-                    Analisar gastos <ArrowRight size={15} />
-                  </button>
-                  <button
-                    className="text-button"
-                    onClick={() =>
-                      openEditor("transactions", undefined, {
-                        type: "transfer",
-                        toId: account.id,
-                        title: `Pagamento · ${account.name}`,
-                        invoiceMonth: month,
-                        amount: (summary.outstanding / 100).toFixed(2),
-                        date: today(),
-                      })
-                    }
-                  >
-                    Registrar pagamento <ArrowUpRight size={16} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={`Editar ${account.name}`}
-                    onClick={() => openEditor("accounts", account)}
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={`Excluir ${account.name}`}
-                    onClick={() => askDelete("accounts", account.id, account.name)}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-            </article>
-          );
-        })}
+        {creditCards.map(({ account, totalDebt }) => (
+          <CreditCardPanel
+            key={account.id}
+            state={state}
+            account={account}
+            totalDebt={totalDebt}
+            hidden={hidden}
+            openEditor={openEditor}
+            askDelete={askDelete}
+            setView={setView}
+            setOverviewAccountId={setOverviewAccountId}
+          />
+        ))}
       </div>
       {!state.accounts.length && (
         <section className="panel">

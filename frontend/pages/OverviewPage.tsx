@@ -8,7 +8,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { brl } from "@/shared/finance";
 
-import { monthLabel, categoryColorFor } from "@/frontend/finance/presentation";
+import { monthLabel, categoryColorFor, shortDate } from "@/frontend/finance/presentation";
 import { ALL_ACCOUNTS, type AlertItem, type PageProps } from "@/frontend/finance/types";
 import Empty from "@/frontend/components/finance/Empty";
 
@@ -39,13 +39,13 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
   const categoryColor = (name: string) => categoryColorFor(state, name);
   const selectedAccountId = overviewAccountId ?? ALL_ACCOUNTS;
   const updateAccount = setOverviewAccountId ?? (() => {});
-  const { stats, cash, cardDebt, cashPending, available, categoryData, monthlyBudgets, agendaItems, alerts, insights, chartData, selectedAccount, selectedInvoice } = useMemo(
+  const { stats, cash, cardDebt, cashPending, cardLimitAvailable, projection, categoryData, monthlyBudgets, agendaItems, alerts, insights, chartData, selectedAccount, selectedInvoice } = useMemo(
     () => overviewModel(state, month, selectedAccountId),
     [state, month, selectedAccountId],
   );
   const headlineBalance = selectedAccount?.kind === "credit"
-    ? selectedAccount.limit - cardDebt
-    : available;
+    ? cardLimitAvailable ?? 0
+    : cash;
   const recentTransactions = useMemo(() => [...stats.tx].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5), [stats.tx]);
   const alertCard = (alert: AlertItem) => (
     <div className={`alert-item ${alert.tone}`} key={alert.id}>
@@ -111,8 +111,8 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
               {selectedAccount?.kind === "credit"
                 ? "Limite disponível"
                 : selectedAccount
-                  ? "Disponível após pendências"
-                  : "Disponível após compromissos"}
+                  ? "Saldo real nesta conta"
+                  : "Saldo real nas contas"}
             </span>
             <button
               className="icon-button"
@@ -136,9 +136,9 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
                   : "O limite foi ultrapassado; revise a fatura"
                 : headlineBalance >= 0
                   ? selectedAccount
-                    ? "Saldo disponível depois dos pendentes"
-                    : "Um panorama do que você tem hoje"
-                  : "Vamos reorganizar os próximos passos"}
+                    ? "Movimentações pagas até hoje, sem descontar pendências."
+                    : "Soma do dinheiro nas contas e carteira até hoje."
+                  : "O saldo registrado está abaixo de zero."}
             </span>
           </div>
           <div className="balance-bottom">
@@ -154,19 +154,19 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
             ) : selectedAccount ? (
               <>
                 <span>
-                  Saldo atual <strong>{displayMoney(cash)}</strong>
+                  Despesas pendentes <strong>{displayMoney(cashPending)}</strong>
                 </span>
-                <span title="Despesas pendentes que ainda não debitaram o saldo.">
-                  Pendentes <strong>{displayMoney(cashPending)}</strong>
+                <span title="Estimativa separada do saldo real, com movimentos previstos para os próximos 30 dias.">
+                  Saldo projetado em 30 dias <strong>{displayMoney(projection?.projectedBalance ?? cash)}</strong>
                 </span>
               </>
             ) : (
               <>
                 <span>
-                  Saldo em contas <strong>{displayMoney(cash)}</strong>
+                  Despesas pendentes <strong>{displayMoney(cashPending)}</strong>
                 </span>
-                <span title="Despesas pendentes e toda a dívida dos cartões.">
-                  Compromissos <strong>{displayMoney(cardDebt + cashPending)}</strong>
+                <span title="Inclui faturas atuais e parcelas futuras. Não é descontado do saldo real acima.">
+                  Dívida total dos cartões <strong>{displayMoney(cardDebt)}</strong>
                 </span>
               </>
             )}
@@ -195,6 +195,69 @@ function OverviewPage({ state, month, hidden, focus, openEditor, askDelete, setV
           </span>
         </article>
       </section>
+      {!focus && projection && (
+        <section className="panel secondary cashflow-projection" aria-label="Fluxo de caixa projetado">
+          <div className="section-head cashflow-section-head">
+            <div>
+              <h2><CalendarDays size={17} /> Fluxo de caixa projetado</h2>
+              <p>Próximos 30 dias. Esta estimativa não reduz o saldo real de hoje.</p>
+            </div>
+            <span className="cashflow-badge">PROJEÇÃO</span>
+          </div>
+          <div className="cashflow-summary">
+            <div>
+              <span>Entradas previstas</span>
+              <strong className="cashflow-positive">{displayMoney(projection.income)}</strong>
+            </div>
+            <div>
+              <span>Saídas previstas</span>
+              <strong className="cashflow-negative">{displayMoney(projection.expense)}</strong>
+            </div>
+            <div className={projection.projectedBalance < 0 ? "cashflow-ending negative" : "cashflow-ending"}>
+              <span>Saldo projetado em {shortDate(projection.endDate)}</span>
+              <strong>{displayMoney(projection.projectedBalance)}</strong>
+            </div>
+          </div>
+          {projection.days.length ? (
+            <div className="cashflow-days">
+              {projection.days.map((day) => (
+                <div className="cashflow-day" key={day.date}>
+                  <div className="cashflow-day-head">
+                    <strong>{day.date === projection.asOf ? "Hoje" : shortDate(day.date)}</strong>
+                    <span>Saldo ao fim do dia <b>{displayMoney(day.balance)}</b></span>
+                  </div>
+                  <div className="cashflow-items">
+                    {day.items.map((item) => (
+                      <div className="cashflow-item" key={item.id}>
+                        <span className={`cashflow-direction ${item.direction}`}>
+                          {item.direction === "income" ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}
+                        </span>
+                        <div className="cashflow-item-copy">
+                          <strong>{item.title}</strong>
+                          <span>
+                            {item.overdue ? "Vencido" : item.source === "recurrence" ? "Recorrente" : item.source === "income-plan" ? "Entrada automática" : item.source === "card-invoice" ? "Fatura do cartão" : item.source === "transfer" ? "Transferência" : "Lançamento previsto"}
+                            {item.accountName ? ` · ${item.accountName}` : ""}
+                          </span>
+                        </div>
+                        <strong className={`cashflow-amount ${item.direction}`}>
+                          {item.direction === "income" ? "+" : "−"}{displayMoney(item.amount)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="cashflow-empty">Nenhuma entrada ou saída com data prevista neste período.</p>
+          )}
+          <p className="cashflow-note">
+            {selectedAccount
+              ? "Considera movimentos datados desta conta. Planos de renda sem data e faturas sem conta de pagamento ficam fora desta projeção."
+              : "Inclui faturas de cartão com vencimento no período. Planos de renda sem data ficam fora; transferências entre suas contas não alteram o total consolidado."}
+          </p>
+        </section>
+      )}
       <QuickEntry key={quickVersion} openEditor={openEditor} uiSession={uiSession} />
       {alerts.length > 0 && (
         <section className="panel alert-panel">

@@ -190,6 +190,35 @@
 .export-note{align-self:center;color:#8c9d91;font-size:11px;line-height:1.4}
 
 .credit-container{padding:0;overflow:hidden;border-radius:14px;box-shadow:0 8px 22px #253c2e08}
+
+.credit-invoice-navigation{display:grid;grid-template-columns:auto minmax(190px,1fr) auto auto;align-items:end;gap:10px;margin-bottom:12px}
+.credit-invoice-navigation .field{margin:0;min-width:0}
+.credit-invoice-navigation .field>span{font-size:10px}
+.credit-invoice-navigation select,.transaction-invoice-filters select{width:100%;min-height:40px;padding:8px 11px;border:1px solid #dfe7e1;border-radius:8px;background:#fff;color:#536457;font:inherit;font-size:12px}
+.credit-invoice-status{align-self:center;padding:6px 9px;border-radius:999px;background:#edf5ef;color:#62836a;font-size:10px;font-weight:650;white-space:nowrap}
+.credit-invoice-status.overdue{background:#fff2ed;color:#ae6d52}
+.credit-invoice-status.paid{background:#eaf6ed;color:#4d9161}
+.credit-invoice-status.closed{background:#f1f3ef;color:#79877b}
+.credit-invoice-period{margin:-2px 0 17px;color:#8d9a90;font-size:11px}
+.credit-invoice-purchases{margin-top:18px;border-top:1px solid #edf1ed;padding-top:13px}
+.credit-invoice-purchases summary{cursor:pointer;color:#52715a;font-size:12px;font-weight:600}
+.credit-invoice-purchases>p{padding:16px 0;color:#929e94;font-size:12px}
+.credit-invoice-purchases table{min-width:580px}
+.credit-invoice-purchases [data-slot=table-container]{overflow-x:auto}
+.transaction-invoice-filters{display:flex;align-items:end;gap:12px;margin-bottom:20px}
+.transaction-invoice-filters .field{width:min(100%,360px);margin:0}
+.transaction-invoice-filters .field>span{font-size:11px}
+.agenda-row-actions{flex:0 0 auto;gap:2px}
+.agenda-row-actions .icon-button{width:29px;height:29px}
+@media(max-width:767px){
+  .credit-invoice-navigation{grid-template-columns:1fr 1fr;align-items:stretch}
+  .credit-invoice-navigation .field{grid-column:1/-1;grid-row:1}
+  .credit-invoice-status{justify-self:end;align-self:center}
+  .transaction-invoice-filters{align-items:stretch;flex-direction:column}
+  .transaction-invoice-filters .field{width:100%}
+  .agenda-row{flex-wrap:wrap}
+  .agenda-row-actions{margin-left:auto}
+}
 .credit-learning-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:20px 22px;background:linear-gradient(125deg,color-mix(in srgb,var(--credit-accent) 90%,#183b2b),color-mix(in srgb,var(--credit-accent) 67%,#19392a));color:#fff}
 .credit-learning-header>div:first-child{display:flex;flex-direction:column;gap:7px;min-width:0}
 .credit-learning-header>div:first-child>span{color:#ffffffbd;font-size:11px}
@@ -232,3 +261,37 @@
 .credit-actions .text-button:nth-child(2){margin-left:auto}
 .credit-actions .icon-button{width:29px;height:29px}
 @media(max-width:767px){.credit-learning-header{padding:18px}.credit-info{padding:18px}.credit-spent-primary>strong{font-size:29px}.credit-learning-metrics{gap:12px}.credit-actions{gap:5px}.credit-actions .text-button{font-size:10px}.credit-actions .text-button:nth-child(2){margin-left:0}}
+
+.cashflow-projection{margin-bottom:22px}
+.cashflow-section-head h2{display:flex;align-items:center;gap:8px}
+.cashflow-badge{padding:6px 9px;border:1px solid #e0ebe1;border-radius:999px;background:#f4f8f3;color:#6f8c72;font-size:9px;font-weight:700;letter-spacing:.8px}
+.cashflow-summary{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:12px}
+.cashflow-summary>div{display:flex;flex-direction:column;gap:7px;padding:14px 16px;border:1px solid #edf1ec;border-radius:9px;background:#fbfcfa;min-width:0}
+.cashflow-summary span{color:#87948a;font-size:11px}
+.cashflow-summary strong{color:#53695a;font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.cashflow-summary .cashflow-positive,.cashflow-item .income{color:#408c61}
+.cashflow-summary .cashflow-negative,.cashflow-item .expense{color:#b77948}
+.cashflow-summary .cashflow-ending{border-color:#dcebdd;background:#f2f8f2}
+.cashflow-summary .cashflow-ending strong{color:#285e40;font-size:20px}
+.cashflow-summary .cashflow-ending.negative{border-color:#f0ded5;background:#fdf5f1}
+.cashflow-summary .cashflow-ending.negative strong{color:#ad6048}
+.cashflow-days{display:flex;flex-direction:column;margin-top:16px}
+.cashflow-day{display:grid;grid-template-columns:170px minmax(0,1fr);gap:16px;padding:15px 0;border-bottom:1px solid #edf1ec}
+.cashflow-day:last-child{border-bottom:0}
+.cashflow-day-head{display:flex;flex-direction:column;gap:6px;padding-top:3px}
+.cashflow-day-head>strong{color:#526a57;font-size:12px;font-weight:650}
+.cashflow-day-head>span{display:flex;flex-direction:column;gap:3px;color:#98a39a;font-size:10px}
+.cashflow-day-head b{color:#617765;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums}
+.cashflow-items{display:flex;flex-direction:column;gap:9px}
+.cashflow-item{display:flex;align-items:center;gap:10px;min-width:0}
+.cashflow-direction{display:grid;place-items:center;width:29px;height:29px;flex-shrink:0;border-radius:8px}
+.cashflow-direction.income{background:#edf7ef;color:#4a9a69}
+.cashflow-direction.expense{background:#fbf3e9;color:#c1844c}
+.cashflow-item-copy{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.cashflow-item-copy>strong{overflow:hidden;color:#526558;font-size:11px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.cashflow-item-copy>span{color:#9aa59c;font-size:10px}
+.cashflow-amount{flex-shrink:0;color:#bd7a49;font-size:11px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cashflow-amount.income{color:#438c61}
+.cashflow-note,.cashflow-empty{margin-top:14px;color:#929e94;font-size:10px;line-height:1.6}
+.cashflow-empty{padding:16px;border:1px dashed #e4ebe4;border-radius:8px;background:#fbfcfa;text-align:center}
+@media(max-width:767px){.cashflow-summary{grid-template-columns:1fr 1fr}.cashflow-summary .cashflow-ending{grid-column:1/-1}.cashflow-day{grid-template-columns:1fr;gap:10px}.cashflow-day-head{flex-direction:row;align-items:center;justify-content:space-between}.cashflow-day-head>span{align-items:flex-end;text-align:right}}

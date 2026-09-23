@@ -9,11 +9,14 @@ await build({
       export {parseNavigation, navigationSearch} from './frontend/finance/navigation';
       export {overviewModel, transactionsForAccount} from './frontend/pages/overview-model';
       export {default as TransactionsPage} from './frontend/pages/TransactionsPage';
+      export {default as AccountsPage} from './frontend/pages/AccountsPage';
+      export {default as AgendaPage} from './frontend/pages/AgendaPage';
+      export {agendaFor} from './frontend/finance/presentation';
       export {filterTransactions} from './frontend/finance/transactions';
       export {createEditor} from './frontend/finance/editor';
       export {createUiSession} from './frontend/finance/ui-session';
       export {demoState} from './frontend/demo';
-      export {EMPTY} from './shared/finance';
+      export {EMPTY, cardInvoiceForPurchaseDate, cardInvoicesFor, today} from './shared/finance';
     `,
     resolveDir: process.cwd(),
     loader: 'tsx',

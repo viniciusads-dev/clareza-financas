@@ -105,25 +105,27 @@ const actionKind: FormKind =
               <p>{pageDescription}</p>
             </div>
             <div className="title-actions">
-              <div className="month-picker">
-                <button
-                  aria-label="Mês anterior"
-                  onClick={() =>
-                    setMonth(addMonths(`${month}-01`, -1).slice(0, 7))
-                  }
-                >
-                  <ChevronLeft size={17} />
-                </button>
-                <span>{monthLabel(month)}</span>
-                <button
-                  aria-label="Próximo mês"
-                  onClick={() =>
-                    setMonth(addMonths(`${month}-01`, 1).slice(0, 7))
-                  }
-                >
-                  <ChevronRight size={17} />
-                </button>
-              </div>
+              {view !== "accounts" && (
+                <div className="month-picker">
+                  <button
+                    aria-label="Mês anterior"
+                    onClick={() =>
+                      setMonth(addMonths(`${month}-01`, -1).slice(0, 7))
+                    }
+                  >
+                    <ChevronLeft size={17} />
+                  </button>
+                  <span>{monthLabel(month)}</span>
+                  <button
+                    aria-label="Próximo mês"
+                    onClick={() =>
+                      setMonth(addMonths(`${month}-01`, 1).slice(0, 7))
+                    }
+                  >
+                    <ChevronRight size={17} />
+                  </button>
+                </div>
+              )}
               <button
                 className="primary-button"
                 onClick={() => (demo ? start() : openEditor(actionKind))}

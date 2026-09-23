@@ -3,7 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import CategoryIcon from "@/frontend/components/finance/CategoryIcon";
 import { categoryColorFor, isPendingTransaction, shortDate } from "@/frontend/finance/presentation";
 import type { PageProps } from "@/frontend/finance/types";
-import { brl, type Transaction } from "@/shared/finance";
+import { brl, cardInvoiceForTransaction, type Transaction } from "@/shared/finance";
 import { Pencil, Trash2 } from "lucide-react";
 export default function TransactionTable({ rows, state, hidden, openEditor, askDelete, compact = false }: Pick<PageProps, "state" | "hidden" | "openEditor" | "askDelete"> & { rows: Transaction[]; compact?: boolean }) {
   function displayMoney(value: number) {
@@ -23,7 +23,12 @@ export default function TransactionTable({ rows, state, hidden, openEditor, askD
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((transaction) => (
+        {rows.map((transaction) => {
+          const invoice = cardInvoiceForTransaction(state, transaction);
+          const installmentLabel = (transaction.installments ?? 1) > 1
+            ? `Editar parcela ${transaction.installment ?? 1}/${transaction.installments} de ${transaction.title}`
+            : `Editar ${transaction.title}`;
+          return (
           <TableRow key={transaction.id}>
             <TableCell>
               <div className="transaction-name">
@@ -42,6 +47,8 @@ export default function TransactionTable({ rows, state, hidden, openEditor, askD
                     {transaction.subcategory
                       ? ` · ${transaction.subcategory}`
                       : ""}
+                    {transaction.purchaseDate && ` · Compra em ${shortDate(transaction.purchaseDate)}`}
+                    {invoice && ` · Fatura vence ${shortDate(invoice.dueDate)}`}
                     {isPending(transaction) && (
                       <em>
                         {" "}
@@ -82,15 +89,13 @@ export default function TransactionTable({ rows, state, hidden, openEditor, askD
             {!compact && (
               <TableCell>
                 <div className="row-actions">
-                  {(transaction.installments ?? 1) === 1 && (
-                    <button
-                      className="icon-button"
-                      aria-label={`Editar ${transaction.title}`}
-                      onClick={() => openEditor("transactions", transaction)}
-                    >
-                      <Pencil size={16} />
-                    </button>
-                  )}
+                  <button
+                    className="icon-button"
+                    aria-label={installmentLabel}
+                    onClick={() => openEditor("transactions", transaction)}
+                  >
+                    <Pencil size={16} />
+                  </button>
                   <button
                     className="icon-button"
                     aria-label={`Excluir ${transaction.title}`}
@@ -108,7 +113,8 @@ export default function TransactionTable({ rows, state, hidden, openEditor, askD
               </TableCell>
             )}
           </TableRow>
-        ))}
+          );
+        })}
       </TableBody>
     </Table>
   );

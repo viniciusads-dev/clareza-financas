@@ -28,6 +28,9 @@ export type AgendaItem = {
   category: string;
   recurring: boolean;
   accountId: string;
+  accountName?: string;
+  context?: string;
+  source?: { kind: FormKind; record: Entity };
 };
 export type AlertItem = {
   id: string;

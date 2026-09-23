@@ -24,6 +24,10 @@ export type Transaction = {
     installments?: number;
     purchaseDate?: string;
     invoiceMonth?: string;
+    cardInvoiceId?: string;
+    cardInvoicePeriodStart?: string;
+    cardInvoicePeriodEnd?: string;
+    cardInvoiceDueDate?: string;
     subcategory?: string;
     tags?: string[];
     recurrenceId?: string;
@@ -104,6 +108,28 @@ export const EMPTY: State = {
     incomePlans: [],
     categories: [],
     tags: [],
+};
+
+export type CardInvoicePeriod = {
+    id: string;
+    cardId: string;
+    periodStart: string;
+    periodEnd: string;
+    dueDate: string;
+    dueMonth: string;
+};
+
+export type CardInvoice = CardInvoicePeriod & {
+    purchases: Transaction[];
+    payments: Transaction[];
+    spent: number;
+    paid: number;
+    scheduledPayment: number;
+    outstanding: number;
+    projectedOutstanding: number;
+    status: "open" | "closed" | "paid" | "overdue";
+    previousSpent: number;
+    topCategory?: { name: string; amount: number };
 };
 export const categories = [
     "Alimentação",
@@ -225,12 +251,122 @@ export function nextRecurrenceDate(
     if (frequency === "weekly") return addDays(date, 7);
     return addMonths(date, frequency === "yearly" ? 12 : 1);
 }
+function dateAtDay(month: string, day: number) {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+    return `${month}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+}
+
+export function cardInvoiceForPeriodEnd(
+    card: Account,
+    periodEnd: string,
+): CardInvoicePeriod {
+    const endMonth = periodEnd.slice(0, 7);
+    const end = dateAtDay(endMonth, card.closing);
+    const startMonth = addMonths(`${endMonth}-01`, -1).slice(0, 7);
+    const previousEnd = dateAtDay(startMonth, card.closing);
+    const dueMonth = card.due <= card.closing
+        ? addMonths(`${endMonth}-01`, 1).slice(0, 7)
+        : endMonth;
+    const dueDate = dateAtDay(dueMonth, card.due);
+    return {
+        id: `${card.id}:${end}`,
+        cardId: card.id,
+        periodStart: addDays(previousEnd, 1),
+        periodEnd: end,
+        dueDate,
+        dueMonth,
+    };
+}
+
+export function cardInvoiceForPurchaseDate(
+    card: Account,
+    purchaseDate: string,
+): CardInvoicePeriod {
+    const month = purchaseDate.slice(0, 7);
+    const closeThisMonth = dateAtDay(month, card.closing);
+    const periodEnd = purchaseDate <= closeThisMonth
+        ? closeThisMonth
+        : dateAtDay(addMonths(`${month}-01`, 1).slice(0, 7), card.closing);
+    return cardInvoiceForPeriodEnd(card, periodEnd);
+}
+
+export function cardInvoiceForDueMonth(
+    card: Account,
+    dueMonth: string,
+): CardInvoicePeriod {
+    const closeMonth = card.due <= card.closing
+        ? addMonths(`${dueMonth}-01`, -1).slice(0, 7)
+        : dueMonth;
+    return cardInvoiceForPeriodEnd(card, dateAtDay(closeMonth, card.closing));
+}
+
+export function cardInvoiceForDueDate(
+    card: Account,
+    dueDate: string,
+): CardInvoicePeriod {
+    const period = cardInvoiceForDueMonth(card, dueDate.slice(0, 7));
+    return { ...period, dueDate, dueMonth: dueDate.slice(0, 7) };
+}
+
+export function cardInvoiceForTransaction(
+    state: State,
+    transaction: Transaction,
+): CardInvoicePeriod | undefined {
+    const card = transaction.type === "transfer"
+        ? state.accounts.find((account) => account.id === transaction.toId && account.kind === "credit")
+        : state.accounts.find((account) => account.id === transaction.accountId && account.kind === "credit");
+    if (!card) return undefined;
+
+    if (
+        transaction.cardInvoiceId &&
+        transaction.cardInvoicePeriodStart &&
+        transaction.cardInvoicePeriodEnd &&
+        transaction.cardInvoiceDueDate
+    ) {
+        return {
+            id: transaction.cardInvoiceId,
+            cardId: card.id,
+            periodStart: transaction.cardInvoicePeriodStart,
+            periodEnd: transaction.cardInvoicePeriodEnd,
+            dueDate: transaction.cardInvoiceDueDate,
+            dueMonth: transaction.cardInvoiceDueDate.slice(0, 7),
+        };
+    }
+
+    const invoiceIdPrefix = `${card.id}:`;
+    if (transaction.cardInvoiceId?.startsWith(invoiceIdPrefix)) {
+        const periodEnd = transaction.cardInvoiceId.slice(invoiceIdPrefix.length);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(periodEnd))
+            return cardInvoiceForPeriodEnd(card, periodEnd);
+    }
+
+    if (transaction.type === "transfer" && transaction.invoiceMonth)
+        return cardInvoiceForDueMonth(card, transaction.invoiceMonth);
+    return cardInvoiceForDueDate(card, transaction.date);
+}
+
+export function nextCardInvoicePeriod(
+    card: Account,
+    period: CardInvoicePeriod,
+    offset = 1,
+): CardInvoicePeriod {
+    const nextMonth = addMonths(`${period.periodEnd.slice(0, 7)}-01`, offset).slice(0, 7);
+    return cardInvoiceForPeriodEnd(card, dateAtDay(nextMonth, card.closing));
+}
+
 export function cardDue(date: string, closing: number, due: number) {
-    const [y, m, d] = date.split("-").map(Number);
-    const shift = (d >= closing ? 1 : 0) + (due <= closing ? 1 : 0);
-    const base = addMonths(`${y}-${String(m).padStart(2, "0")}-01`, shift);
-    const [by, bm] = base.split("-").map(Number);
-    return `${base.slice(0, 7)}-${String(Math.min(due, new Date(Date.UTC(by, bm, 0)).getUTCDate())).padStart(2, "0")}`;
+    const temporaryCard: Account = {
+        id: "card",
+        name: "Cartão",
+        kind: "credit",
+        opening: 0,
+        color: colors[0],
+        limit: 0,
+        closing,
+        due,
+    };
+    return cardInvoiceForPurchaseDate(temporaryCard, date).dueDate;
 }
 export function splitAmount(amount: number, n: number): number[] {
     const base = Math.floor(amount / n);
@@ -283,16 +419,18 @@ export function creditCardInvoiceSummary(
     s: State,
     accountId: string,
     month: string,
+    asOf = today(),
 ): CreditCardInvoiceSummary {
     const monthly = new Map<string, {
         spent: number;
         paid: number;
+        scheduledPayment: number;
         categories: Map<string, number>;
     }>();
     const bucket = (period: string) => {
         let result = monthly.get(period);
         if (!result) {
-            result = { spent: 0, paid: 0, categories: new Map() };
+            result = { spent: 0, paid: 0, scheduledPayment: 0, categories: new Map() };
             monthly.set(period, result);
         }
         return result;
@@ -315,7 +453,10 @@ export function creditCardInvoiceSummary(
             transaction.status === "paid"
         ) {
             const period = transaction.invoiceMonth ?? transaction.date.slice(0, 7);
-            bucket(period).paid += transaction.amount;
+            if (transaction.date <= asOf)
+                bucket(period).paid += transaction.amount;
+            else
+                bucket(period).scheduledPayment += transaction.amount;
         }
     }
 
@@ -323,7 +464,16 @@ export function creditCardInvoiceSummary(
         const result = monthly.get(period);
         const spent = result?.spent ?? 0;
         const paid = result?.paid ?? 0;
-        return { month: period, spent, paid, outstanding: Math.max(0, spent - paid) };
+        const scheduledPayment = result?.scheduledPayment ?? 0;
+        const outstanding = Math.max(0, spent - paid);
+        return {
+            month: period,
+            spent,
+            paid,
+            scheduledPayment,
+            outstanding,
+            projectedOutstanding: Math.max(0, outstanding - scheduledPayment),
+        };
     };
     const current = totalsFor(month);
     const previousMonth = addMonths(`${month}-01`, -1).slice(0, 7);
@@ -333,12 +483,15 @@ export function creditCardInvoiceSummary(
         .map(([period]) => period)
         .sort();
     const futureCommitted = futureMonths.reduce(
-        (total, period) => total + totalsFor(period).outstanding,
+        (total, period) => total + totalsFor(period).projectedOutstanding,
         0,
     );
     const upcomingInvoices = futureMonths
         .slice(0, 3)
-        .map(totalsFor);
+        .map((period) => {
+            const total = totalsFor(period);
+            return { ...total, outstanding: total.projectedOutstanding };
+        });
     const topCategory = [...(monthly.get(month)?.categories ?? new Map())]
         .map(([name, amount]) => ({ name, amount }))
         .sort((a, b) => b.amount - a.amount)[0];
@@ -357,6 +510,7 @@ export function invoiceBalance(
     s: State,
     accountId: string,
     month: string,
+    asOf = today(),
 ): number {
     const purchases = s.transactions
         .filter(
@@ -372,8 +526,106 @@ export function invoiceBalance(
                 transaction.toId === accountId &&
                 transaction.type === "transfer" &&
                 transaction.status === "paid" &&
+                transaction.date <= asOf &&
                 (transaction.invoiceMonth ?? transaction.date.slice(0, 7)) === month,
         )
         .reduce((total, transaction) => total + transaction.amount, 0);
     return Math.max(0, purchases - payments);
+}
+
+export function cardInvoicesFor(
+    state: State,
+    card: Account,
+    asOf = today(),
+): CardInvoice[] {
+    const buckets = new Map<string, {
+        period: CardInvoicePeriod;
+        purchases: Transaction[];
+        payments: Transaction[];
+    }>();
+    const ensure = (period: CardInvoicePeriod) => {
+        let bucket = buckets.get(period.id);
+        if (!bucket) {
+            bucket = { period, purchases: [], payments: [] };
+            buckets.set(period.id, bucket);
+        }
+        return bucket;
+    };
+
+    const current = cardInvoiceForPurchaseDate(card, asOf);
+    ensure(nextCardInvoicePeriod(card, current, -1));
+    ensure(current);
+    ensure(nextCardInvoicePeriod(card, current));
+
+    for (const transaction of state.transactions) {
+        if (
+            transaction.accountId === card.id &&
+            transaction.type === "expense"
+        ) {
+            const period = cardInvoiceForTransaction(state, transaction);
+            if (period) ensure(period).purchases.push(transaction);
+        } else if (
+            transaction.toId === card.id &&
+            transaction.type === "transfer"
+        ) {
+            const period = cardInvoiceForTransaction(state, transaction);
+            if (period) ensure(period).payments.push(transaction);
+        }
+    }
+
+    const ordered = [...buckets.values()].sort((a, b) =>
+        a.period.periodEnd.localeCompare(b.period.periodEnd),
+    );
+    return ordered.map((bucket) => {
+        const purchases = bucket.purchases.sort((a, b) =>
+            a.date.localeCompare(b.date) || a.title.localeCompare(b.title),
+        );
+        const payments = bucket.payments.sort((a, b) =>
+            a.date.localeCompare(b.date),
+        );
+        const spent = purchases.reduce((sum, transaction) => sum + transaction.amount, 0);
+        const paid = payments
+            .filter((transaction) => transaction.status === "paid" && transaction.date <= asOf)
+            .reduce((sum, transaction) => sum + transaction.amount, 0);
+        const scheduledPayment = payments
+            .filter((transaction) => transaction.status === "paid" && transaction.date > asOf)
+            .reduce((sum, transaction) => sum + transaction.amount, 0);
+        const outstanding = Math.max(0, spent - paid);
+        const categoryAmounts = new Map<string, number>();
+        for (const transaction of purchases)
+            categoryAmounts.set(
+                transaction.category,
+                (categoryAmounts.get(transaction.category) ?? 0) + transaction.amount,
+            );
+        const topCategory = [...categoryAmounts]
+            .map(([name, amount]) => ({ name, amount }))
+            .sort((a, b) => b.amount - a.amount)[0];
+        const priorPeriod = nextCardInvoicePeriod(card, bucket.period, -1);
+        const priorInvoice = buckets.get(priorPeriod.id);
+        const previousTotal = priorInvoice?.purchases.reduce(
+            (sum, transaction) => sum + transaction.amount,
+            0,
+        ) ?? 0;
+        const status: CardInvoice["status"] = outstanding === 0 && spent > 0
+            ? "paid"
+            : bucket.period.dueDate < asOf && outstanding > 0
+                ? "overdue"
+                : bucket.period.periodEnd < asOf
+                    ? "closed"
+                    : "open";
+
+        return {
+            ...bucket.period,
+            purchases,
+            payments,
+            spent,
+            paid,
+            scheduledPayment,
+            outstanding,
+            projectedOutstanding: Math.max(0, outstanding - scheduledPayment),
+            status,
+            previousSpent: previousTotal,
+            ...(topCategory ? { topCategory } : {}),
+        };
+    });
 }

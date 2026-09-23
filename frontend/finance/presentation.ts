@@ -1,5 +1,5 @@
 import type { AgendaItem } from "@/frontend/finance/types";
-import { addDays, categories, colors, invoiceBalance, today, type State, type Transaction } from "@/shared/finance";
+import { addDays, cardInvoiceForTransaction, cardInvoicesFor, categories, colors, today, type CardInvoice, type State, type Transaction } from "@/shared/finance";
 export const incomeCategories = ["Salário", "Freelance", "Outros"];
 export const expenseCategories = categories.filter(
   (category) => !incomeCategories.includes(category),
@@ -41,15 +41,15 @@ export function categoryColorFor(state: State, name: string) {
     colors[Math.max(0, categories.indexOf(name)) % colors.length];
 }
 export function isPendingTransaction(state: State, transaction: Transaction) {
-  return transaction.type === "expense" &&
-    state.accounts.find((account) => account.id === transaction.accountId)
-      ?.kind === "credit"
-    ? invoiceBalance(
-      state,
-      transaction.accountId,
-      transaction.date.slice(0, 7),
-    ) > 0
-    : transaction.status === "pending";
+  if (transaction.type !== "expense") return transaction.status === "pending";
+  const account = state.accounts.find((item) => item.id === transaction.accountId);
+  if (account?.kind !== "credit") return transaction.status === "pending";
+  const period = cardInvoiceForTransaction(state, transaction);
+  return Boolean(
+    period &&
+      cardInvoicesFor(state, account).find((invoice) => invoice.id === period.id)
+        ?.outstanding,
+  );
 }
 export function categoryTotals(transactions: Transaction[]) {
   return Object.entries(
@@ -65,7 +65,18 @@ export function categoryTotals(transactions: Transaction[]) {
     .sort((a, b) => b.value - a.value);
 }
 export function agendaFor(state: State, currentDate = today()): AgendaItem[] {
-  const horizon = addDays(currentDate, 30); return [
+  const horizon = addDays(currentDate, 30);
+  const invoicesByCard = new Map<string, Map<string, CardInvoice>>();
+  for (const account of state.accounts) {
+    if (account.kind === "credit")
+      invoicesByCard.set(
+        account.id,
+        new Map<string, CardInvoice>(
+          cardInvoicesFor(state, account, currentDate).map((invoice) => [invoice.id, invoice] as const),
+        ),
+      );
+  }
+  return [
     ...state.transactions
       .filter(
         (transaction) =>
@@ -73,16 +84,39 @@ export function agendaFor(state: State, currentDate = today()): AgendaItem[] {
           transaction.status === "pending" &&
           transaction.date <= horizon,
       )
-      .map((transaction) => ({
-        id: `transaction-${transaction.id}`,
-        date: transaction.date,
-        title: transaction.title,
-        amount: transaction.amount,
-        type: transaction.type as "expense" | "income",
-        category: transaction.category,
-        recurring: Boolean(transaction.recurrenceId),
-        accountId: transaction.accountId,
-      })),
+      .filter((transaction) => {
+        const account = state.accounts.find((item) => item.id === transaction.accountId);
+        if (account?.kind !== "credit") return true;
+        const period = cardInvoiceForTransaction(state, transaction);
+        return Boolean(
+          period && invoicesByCard.get(account.id)?.get(period.id)?.outstanding,
+        );
+      })
+      .map((transaction) => {
+        const account = state.accounts.find((item) => item.id === transaction.accountId);
+        const period = account?.kind === "credit"
+          ? cardInvoiceForTransaction(state, transaction)
+          : undefined;
+        const purchaseDate = transaction.purchaseDate ?? transaction.date;
+        const installment = (transaction.installments ?? 1) > 1
+          ? `Parcela ${transaction.installment ?? 1}/${transaction.installments}`
+          : "Compra no cartão";
+        return {
+          id: `transaction-${transaction.id}`,
+          date: transaction.date,
+          title: transaction.title,
+          amount: transaction.amount,
+          type: transaction.type as "expense" | "income",
+          category: transaction.category,
+          recurring: Boolean(transaction.recurrenceId),
+          accountId: transaction.accountId,
+          accountName: account?.name,
+          ...(period && account?.kind === "credit"
+            ? { context: `${installment} · compra em ${shortDate(purchaseDate)} · fatura vence ${shortDate(period.dueDate)}` }
+            : {}),
+          source: { kind: "transactions" as const, record: transaction },
+        };
+      }),
     ...state.recurrences
       .filter(
         (recurrence) => recurrence.active && recurrence.nextDate <= horizon,
@@ -96,6 +130,8 @@ export function agendaFor(state: State, currentDate = today()): AgendaItem[] {
         category: recurrence.category,
         recurring: true,
         accountId: recurrence.accountId,
+        accountName: state.accounts.find((item) => item.id === recurrence.accountId)?.name,
+        source: { kind: "recurrences" as const, record: recurrence },
       })),
     ...state.incomePlans
       .filter(
@@ -115,6 +151,8 @@ export function agendaFor(state: State, currentDate = today()): AgendaItem[] {
         category: "Salário",
         recurring: true,
         accountId: plan.accountId!,
+        accountName: state.accounts.find((item) => item.id === plan.accountId)?.name,
+        source: { kind: "incomePlans" as const, record: plan },
       })),
   ].sort((a, b) => a.date.localeCompare(b.date));
 }

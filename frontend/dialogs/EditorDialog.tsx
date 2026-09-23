@@ -6,12 +6,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { money, type State } from "@/shared/finance";
+import { cardInvoiceForDueMonth, cardInvoiceForPurchaseDate, cardInvoicesFor, money, today, type State } from "@/shared/finance";
 import { mutate } from "@/frontend/api";
 
 import { toast } from "sonner";
 
-import { splitIds, incomeCategories, expenseCategories } from "@/frontend/finance/presentation";
+import { monthLabel, splitIds, incomeCategories, expenseCategories } from "@/frontend/finance/presentation";
 import type { Editor } from "@/frontend/finance/types";
 
 import Picker from "@/frontend/components/finance/Picker";
@@ -20,6 +20,34 @@ import TagPicker from "@/frontend/components/finance/TagPicker";
 export default function EditorDialog({ initial, state, refresh, onClose, onSaved }: { initial: Editor; state: State; refresh: () => Promise<void>; onClose: () => void; onSaved: () => void }) {
   const [editor, setEditor] = useState(initial); const [saving, setSaving] = useState(false); const [formError, setFormError] = useState("");
   const idempotencyKey = useRef(crypto.randomUUID());
+  const destinationCard = editor?.kind === "transactions" && editor.values.type === "transfer"
+    ? state.accounts.find((account) => account.id === editor.values.toId && account.kind === "credit")
+    : undefined;
+  const invoiceOptions = destinationCard ? cardInvoicesFor(state, destinationCard) : [];
+  const invoiceFromFields = destinationCard && editor
+    ? editor.values.cardInvoiceId && editor.values.cardInvoicePeriodStart && editor.values.cardInvoicePeriodEnd && editor.values.cardInvoiceDueDate
+      ? {
+          id: editor.values.cardInvoiceId,
+          cardId: destinationCard.id,
+          periodStart: editor.values.cardInvoicePeriodStart,
+          periodEnd: editor.values.cardInvoicePeriodEnd,
+          dueDate: editor.values.cardInvoiceDueDate,
+          dueMonth: editor.values.cardInvoiceDueDate.slice(0, 7),
+        }
+      : editor.values.invoiceMonth
+        ? cardInvoiceForDueMonth(destinationCard, editor.values.invoiceMonth)
+        : cardInvoiceForPurchaseDate(destinationCard, today())
+    : undefined;
+  const selectedInvoice = invoiceFromFields
+    ? invoiceOptions.find((invoice) => invoice.id === invoiceFromFields.id) ?? invoiceFromFields
+    : undefined;
+  const selectableInvoices = selectedInvoice && !invoiceOptions.some((invoice) => invoice.id === selectedInvoice.id)
+    ? [...invoiceOptions, selectedInvoice]
+    : invoiceOptions;
+  const editedTransaction = editor?.kind === "transactions"
+    ? state.transactions.find((transaction) => transaction.id === editor.id)
+    : undefined;
+  const editingInstallment = Boolean(editedTransaction && (editedTransaction.installments ?? 1) > 1);
   const topLevelCategories = (type: "expense" | "income") => [
     ...(type === "income" ? incomeCategories : expenseCategories).map(
       (name) => ({ value: name, label: name }),
@@ -81,11 +109,22 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
             : {}),
           accountId: values.accountId,
           ...(values.type === "transfer"
-            ? { toId: values.toId, invoiceMonth: values.invoiceMonth }
+            ? {
+                toId: values.toId,
+                ...(destinationCard && selectedInvoice
+                  ? {
+                      invoiceMonth: selectedInvoice.dueMonth,
+                      cardInvoiceId: selectedInvoice.id,
+                      cardInvoicePeriodStart: selectedInvoice.periodStart,
+                      cardInvoicePeriodEnd: selectedInvoice.periodEnd,
+                      cardInvoiceDueDate: selectedInvoice.dueDate,
+                    }
+                  : {}),
+              }
             : {}),
           date: values.date,
           status: values.type === "transfer" ? "paid" : values.status,
-          installments: Number(values.installments),
+          installments: editor.id ? 1 : Number(values.installments),
         };
       else if (editor.kind === "budgets")
         data = {
@@ -246,9 +285,11 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
               </Tabs>
               <label className="amount-input field">
                 <span>
-                  {Number(editor.values.installments) > 1
-                    ? "Valor total da compra"
-                    : "Quanto?"}
+                  {editingInstallment
+                    ? "Valor desta parcela"
+                    : Number(editor.values.installments) > 1
+                      ? "Valor total da compra"
+                      : "Quanto?"}
                 </span>
                 <div>
                   <span>R$</span>
@@ -307,7 +348,18 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
                   <Picker
                     label="Conta de destino"
                     value={editor.values.toId}
-                    onChange={(value) => field("toId", value)}
+                    onChange={(value) => {
+                      field("toId", value);
+                      const card = state.accounts.find((account) => account.id === value && account.kind === "credit");
+                      if (card) {
+                        const invoice = cardInvoiceForPurchaseDate(card, today());
+                        field("cardInvoiceId", invoice.id);
+                        field("cardInvoicePeriodStart", invoice.periodStart);
+                        field("cardInvoicePeriodEnd", invoice.periodEnd);
+                        field("cardInvoiceDueDate", invoice.dueDate);
+                        field("invoiceMonth", invoice.dueMonth);
+                      }
+                    }}
                     options={state.accounts
                       .filter(
                         (account) => account.id !== editor.values.accountId,
@@ -356,7 +408,11 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
                     <label className="field">
                       <span>
                         Parcelas{" "}
-                        {editor.id ? "(nova compra para parcelar)" : ""}
+                        {editingInstallment
+                          ? `(editando ${editedTransaction?.installment ?? 1}/${editedTransaction?.installments})`
+                          : editor.id
+                            ? "(edição desta compra)"
+                            : ""}
                       </span>
                       <input
                         type="number"
@@ -412,22 +468,35 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
                     onChange={(value) => field("tags", value)}
                   />
                 )}
-              {editor.values.type === "transfer" &&
-                state.accounts.find(
-                  (account) => account.id === editor.values.toId,
-                )?.kind === "credit" && (
-                  <label className="field">
-                    <span>Fatura que estou pagando</span>
-                    <input
-                      type="month"
-                      required
-                      value={editor.values.invoiceMonth}
-                      onChange={(event) =>
-                        field("invoiceMonth", event.target.value)
-                      }
-                    />
-                  </label>
-                )}
+              {editor.values.type === "transfer" && destinationCard && selectedInvoice && (
+                <label className="field">
+                  <span>Fatura que estou pagando</span>
+                  <select
+                    required
+                    value={selectedInvoice.id}
+                    onChange={(event) => {
+                      const invoice = selectableInvoices.find((item) => item.id === event.target.value);
+                      if (!invoice) return;
+                      field("cardInvoiceId", invoice.id);
+                      field("cardInvoicePeriodStart", invoice.periodStart);
+                      field("cardInvoicePeriodEnd", invoice.periodEnd);
+                      field("cardInvoiceDueDate", invoice.dueDate);
+                      field("invoiceMonth", invoice.dueMonth);
+                    }}
+                  >
+                    {[...selectableInvoices].reverse().map((invoice) => (
+                      <option key={invoice.id} value={invoice.id}>
+                        Fatura de {monthLabel(invoice.dueMonth)} · vence {new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {editingInstallment && (
+                <p className="form-hint">
+                  Você está alterando somente esta parcela ({editedTransaction?.installment ?? 1}/{editedTransaction?.installments}). As demais parcelas e a data original da compra serão mantidas.
+                </p>
+              )}
               {!state.accounts.length && (
                 <p className="form-warning">
                   Cadastre uma conta na seção “Contas e cartões” antes de
@@ -717,7 +786,7 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
                     />
                   </label>
                   <label className="field">
-                    <span>Meta pessoal mensal (R$)</span>
+                    <span>Meta pessoal por fatura (R$)</span>
                     <input
                       inputMode="decimal"
                       value={editor.values.monthlyTarget}
@@ -727,7 +796,7 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
                       placeholder="Opcional"
                     />
                     <small>
-                      Escolha quanto deseja gastar por mês. Essa meta não altera o limite do banco.
+                      Escolha uma referência de gastos para cada fatura. Essa meta não altera o limite do banco.
                     </small>
                   </label>
                   <div className="form-grid">

@@ -29,7 +29,7 @@ export default function AgendaPage({ state, hidden, openEditor, askDelete }: Pic
           <Bell size={19} />
         </div>
         {agendaItems.length ? (
-          agendaItems.map(item => <AgendaRow key={item.id} item={item} hidden={hidden} />)
+          agendaItems.map(item => <AgendaRow key={item.id} item={item} hidden={hidden} openEditor={openEditor} askDelete={askDelete} />)
         ) : (
           <Empty
             title="Agenda tranquila."

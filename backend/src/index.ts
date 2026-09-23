@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   addMonths,
+  cardInvoiceForDueDate,
+  cardInvoiceForDueMonth,
   cardDue,
   nextRecurrenceDate,
   scheduledIncomeDate,
@@ -65,6 +67,10 @@ const schemas = {
         .string()
         .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
         .optional(),
+      cardInvoiceId: z.string().min(1).max(220).optional(),
+      cardInvoicePeriodStart: date.optional(),
+      cardInvoicePeriodEnd: date.optional(),
+      cardInvoiceDueDate: date.optional(),
       installments: z.number().int().min(1).max(48).default(1),
     })
     .strict(),
@@ -912,7 +918,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         const t = schemas.transactions.parse(data);
         const account = state.accounts.find((a) => a.id === t.accountId);
         if (!account) throw new HttpError(400, "Escolha uma conta válida.");
-        if (t.type !== "transfer" && (t.toId || t.invoiceMonth))
+        const hasCardInvoiceFields = Boolean(
+          t.cardInvoiceId ||
+          t.cardInvoicePeriodStart ||
+          t.cardInvoicePeriodEnd ||
+          t.cardInvoiceDueDate,
+        );
+        if (
+          t.type !== "transfer" &&
+          (t.toId || t.invoiceMonth || hasCardInvoiceFields)
+        )
           throw new HttpError(
             400,
             "Referências de destino e fatura só podem ser usadas em transferências.",
@@ -926,6 +941,27 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
             );
           if (t.status !== "paid")
             throw new HttpError(400, "Transferências devem estar concluídas.");
+        }
+        if (t.type === "transfer") {
+          const dest = state.accounts.find((candidate) => candidate.id === t.toId);
+          if (dest?.kind !== "credit" && (t.invoiceMonth || hasCardInvoiceFields))
+            throw new HttpError(400, "Associe uma fatura a um cartao de credito.");
+          if (hasCardInvoiceFields) {
+            const completeInvoice = Boolean(
+              t.cardInvoiceId &&
+              t.cardInvoicePeriodStart &&
+              t.cardInvoicePeriodEnd &&
+              t.cardInvoiceDueDate,
+            );
+            if (
+              dest?.kind !== "credit" ||
+              !completeInvoice ||
+              t.cardInvoiceId !== `${dest.id}:${t.cardInvoicePeriodEnd}` ||
+              t.cardInvoicePeriodStart! > t.cardInvoicePeriodEnd! ||
+              t.cardInvoiceDueDate! < t.cardInvoicePeriodEnd!
+            )
+              throw new HttpError(400, "A fatura selecionada nao corresponde ao cartao ou ao periodo.");
+          }
         }
         if (account.kind === "credit" && t.type === "income")
           throw new HttpError(
@@ -963,13 +999,44 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           );
         if (request.method === "PUT") {
           const old = record as Transaction;
-          if (old.installments && old.installments > 1)
+          if (
+            old.installments &&
+            old.installments > 1 &&
+            (old.accountId !== account.id ||
+              account.kind !== "credit" ||
+              t.type !== "expense")
+          )
             throw new HttpError(
               400,
-              "Exclua a parcela e registre a correção para preservar as demais parcelas.",
+              "Edite esta parcela mantendo o cartão e o tipo de despesa originais.",
             );
           if (t.installments > 1)
             throw new HttpError(400, "Cadastre uma nova compra para parcelar.");
+          const editedInvoice = account.kind === "credit" && t.type === "expense"
+            ? t.date === old.date && old.cardInvoiceId && old.cardInvoicePeriodStart && old.cardInvoicePeriodEnd && old.cardInvoiceDueDate
+              ? {
+                  id: old.cardInvoiceId,
+                  periodStart: old.cardInvoicePeriodStart,
+                  periodEnd: old.cardInvoicePeriodEnd,
+                  dueDate: old.cardInvoiceDueDate,
+                }
+              : cardInvoiceForDueDate(account, t.date)
+            : undefined;
+          const transferCard = t.type === "transfer"
+            ? state.accounts.find((candidate) => candidate.id === t.toId && candidate.kind === "credit")
+            : undefined;
+          const paymentInvoice = transferCard
+            ? t.cardInvoiceId
+              ? {
+                  id: t.cardInvoiceId,
+                  periodStart: t.cardInvoicePeriodStart!,
+                  periodEnd: t.cardInvoicePeriodEnd!,
+                  dueDate: t.cardInvoiceDueDate!,
+                }
+              : t.invoiceMonth
+                ? cardInvoiceForDueMonth(transferCard, t.invoiceMonth)
+                : undefined
+            : undefined;
           statements.push(
             env.DB.prepare(
               "UPDATE finance_records SET data = ? WHERE id = ? AND owner = ? AND kind = ?",
@@ -977,7 +1044,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
               JSON.stringify({
                 ...t,
                 date: t.date,
-                installments: 1,
+                installments: old.installments ?? 1,
                 ...(old.groupId ? { groupId: old.groupId } : {}),
                 ...(old.installment ? { installment: old.installment } : {}),
                 ...(old.purchaseDate
@@ -992,6 +1059,22 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
                 ...(old.incomePeriod
                   ? { incomePeriod: old.incomePeriod }
                   : {}),
+                ...(editedInvoice
+                  ? {
+                      cardInvoiceId: editedInvoice.id,
+                      cardInvoicePeriodStart: editedInvoice.periodStart,
+                      cardInvoicePeriodEnd: editedInvoice.periodEnd,
+                      cardInvoiceDueDate: editedInvoice.dueDate,
+                    }
+                  : {}),
+                ...(paymentInvoice
+                  ? {
+                      cardInvoiceId: paymentInvoice.id,
+                      cardInvoicePeriodStart: paymentInvoice.periodStart,
+                      cardInvoicePeriodEnd: paymentInvoice.periodEnd,
+                      cardInvoiceDueDate: paymentInvoice.dueDate,
+                    }
+                  : {}),
               }),
               record!.id,
               owner,
@@ -1000,6 +1083,21 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           );
         } else {
           const groupId = crypto.randomUUID();
+          const destination = t.type === "transfer"
+            ? state.accounts.find((candidate) => candidate.id === t.toId)
+            : undefined;
+          const paymentInvoice = destination?.kind === "credit"
+            ? t.cardInvoiceId
+              ? {
+                  id: t.cardInvoiceId,
+                  periodStart: t.cardInvoicePeriodStart!,
+                  periodEnd: t.cardInvoicePeriodEnd!,
+                  dueDate: t.cardInvoiceDueDate!,
+                }
+              : t.invoiceMonth
+                ? cardInvoiceForDueMonth(destination, t.invoiceMonth)
+                : undefined
+            : undefined;
           const first =
             account.kind === "credit" && t.type === "expense"
               ? cardDue(t.date, account.closing, account.due)
@@ -1015,9 +1113,30 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
                 ...t,
                 amount: value,
                 date: addMonths(first, i),
-                purchaseDate: t.date,
+                ...(account.kind === "credit" && t.type === "expense"
+                  ? { purchaseDate: t.date }
+                  : {}),
                 groupId,
                 installment: i + 1,
+                ...(account.kind === "credit" && t.type === "expense"
+                  ? (() => {
+                      const invoice = cardInvoiceForDueDate(account, addMonths(first, i));
+                      return {
+                        cardInvoiceId: invoice.id,
+                        cardInvoicePeriodStart: invoice.periodStart,
+                        cardInvoicePeriodEnd: invoice.periodEnd,
+                        cardInvoiceDueDate: invoice.dueDate,
+                      };
+                    })()
+                  : {}),
+                ...(paymentInvoice
+                  ? {
+                      cardInvoiceId: paymentInvoice.id,
+                      cardInvoicePeriodStart: paymentInvoice.periodStart,
+                      cardInvoicePeriodEnd: paymentInvoice.periodEnd,
+                      cardInvoiceDueDate: paymentInvoice.dueDate,
+                    }
+                  : {}),
               }, transactionId),
             );
           }

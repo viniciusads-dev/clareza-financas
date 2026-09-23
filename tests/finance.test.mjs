@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
-import {handleApi,readState,money,brl,addMonths,cardDue,splitAmount,balances,invoiceBalance,creditCardInvoiceSummary,today,isBusinessDay,scheduledIncomeDate} from '../.sites-runtime/finance-test.mjs';
+import {handleApi,readState,money,brl,addMonths,cardDue,cardInvoiceForPurchaseDate,cardInvoicesFor,splitAmount,balances,invoiceBalance,creditCardInvoiceSummary,today,isBusinessDay,scheduledIncomeDate} from '../.sites-runtime/finance-test.mjs';
 const account={name:'Conta',kind:'checking',opening:100000,color:'#267a55',limit:0,closing:5,due:12};
 const fixtureTokens={alice:'fixture-session-alice',bob:'fixture-session-bob'};
 function fixtureCookie(owner){return owner?`clareza_session=${fixtureTokens[owner]}`:''}
@@ -14,7 +14,34 @@ function database(){const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFi
 async function seed(db,owner='alice',data=account){const r=await handleApi(req('accounts','POST',data,owner),{DB:db});assert.equal(r.status,201);return (await readState(db,owner)).accounts.at(-1)}
 test('BRL parser preserves cents and rejects excess precision',()=>{assert.equal(money('1.234,56'),123456);assert.equal(money('0,01'),1);assert.equal(money('-45,10'),-4510);assert.throws(()=>money('12,999'));assert.throws(()=>money('Infinity'));assert.throws(()=>money('1e6'))});
 test('BRL formatter receives cent values without scaling them twice',()=>{assert.match(brl(57298),/572,98/);assert.match(brl(2491),/24,91/)});
-test('Installments preserve every cent and clamp month ends',()=>{assert.deepEqual(splitAmount(10000,3),[3334,3333,3333]);assert.equal(addMonths('2026-01-31',1),'2026-02-28');assert.equal(addMonths('2024-01-31',1),'2024-02-29');assert.equal(cardDue('2026-09-05',5,12),'2026-10-12');assert.equal(cardDue('2026-09-04',5,12),'2026-09-12');assert.equal(cardDue('2026-12-26',25,5),'2027-02-05')});
+test('Installments preserve every cent and include the card closing date',()=>{assert.deepEqual(splitAmount(10000,3),[3334,3333,3333]);assert.equal(addMonths('2026-01-31',1),'2026-02-28');assert.equal(addMonths('2024-01-31',1),'2024-02-29');assert.equal(cardDue('2026-09-05',5,12),'2026-09-12');assert.equal(cardDue('2026-09-04',5,12),'2026-09-12');assert.equal(cardDue('2026-12-26',25,5),'2027-02-05')});
+test('Card cut-off periods are inclusive and use the complete invoice cycle',()=>{
+  const card={id:'card',name:'Cartão',kind:'credit',opening:0,color:'#d08b45',limit:500000,closing:24,due:10};
+  const before=cardInvoiceForPurchaseDate(card,'2026-08-25');
+  const cutoff=cardInvoiceForPurchaseDate(card,'2026-09-24');
+  const after=cardInvoiceForPurchaseDate(card,'2026-09-25');
+  assert.deepEqual([before.id,before.periodStart,before.periodEnd,before.dueDate],['card:2026-09-24','2026-08-25','2026-09-24','2026-10-10']);
+  assert.equal(cutoff.id,before.id);
+  assert.deepEqual([after.periodStart,after.periodEnd,after.dueDate],['2026-09-25','2026-10-24','2026-11-10']);
+});
+test('Card invoices keep installment cycles and separate settled from scheduled payments',()=>{
+  const card={id:'card',name:'Cartão',kind:'credit',opening:0,color:'#d08b45',limit:500000,closing:24,due:10};
+  const bank={...account,id:'bank'};
+  const first=cardInvoiceForPurchaseDate(card,'2026-09-24');
+  const next=cardInvoiceForPurchaseDate(card,'2026-09-25');
+  const expense=(id,amount,period,date)=>({id,title:'Compra',amount,type:'expense',category:'Compras',accountId:'card',date,purchaseDate:'2026-09-24',status:'pending',cardInvoiceId:period.id,cardInvoicePeriodStart:period.periodStart,cardInvoicePeriodEnd:period.periodEnd,cardInvoiceDueDate:period.dueDate});
+  const payment=(id,amount,period,date)=>({id,title:'Pagamento',amount,type:'transfer',category:'Transferência',accountId:'bank',toId:'card',invoiceMonth:period.dueMonth,date,status:'paid',cardInvoiceId:period.id,cardInvoicePeriodStart:period.periodStart,cardInvoicePeriodEnd:period.periodEnd,cardInvoiceDueDate:period.dueDate});
+  const state={accounts:[card,bank],transactions:[expense('first',10000,first,first.dueDate),expense('next',4000,next,next.dueDate),payment('settled',2500,first,'2026-09-20'),payment('scheduled',5000,first,'2026-10-09')],budgets:[],goals:[],recurrences:[],incomePlans:[],categories:[],tags:[]};
+  const invoices=cardInvoicesFor(state,card,'2026-09-23');
+  const current=invoices.find(invoice=>invoice.id===first.id);
+  const following=invoices.find(invoice=>invoice.id===next.id);
+  assert.equal(current.spent,10000);
+  assert.equal(current.paid,2500);
+  assert.equal(current.outstanding,7500);
+  assert.equal(current.scheduledPayment,5000);
+  assert.equal(current.projectedOutstanding,2500);
+  assert.equal(following.previousSpent,10000);
+});
 test('Missing identity is denied before any data access',async()=>{assert.equal((await handleApi(req('state','GET',undefined,''),{})).status,401)});
 test('Account registration and login work with Cloudflare-compatible password hashing',async()=>{const {db,sqlite}=database();const credentials={name:'Maria Clareza',email:'Maria@Example.com',password:'senha-segura-123',privacyAccepted:true};const registered=await handleApi(authReq('auth/register','POST',credentials),{DB:db});assert.equal(registered.status,201);const stored=sqlite.prepare('SELECT email, password_iterations FROM app_users WHERE email = ?').get('maria@example.com');assert.equal(stored.email,'maria@example.com');assert.equal(stored.password_iterations,100000);const cookie=registered.headers.get('set-cookie');assert.match(cookie,/clareza_session=.*HttpOnly/);const session=await handleApi(authReq('auth/session','GET',undefined,cookie),{DB:db});assert.equal(session.status,200);assert.equal((await session.json()).authenticated,true);assert.equal((await handleApi(authReq('auth/login','POST',{email:'maria@example.com',password:'senha-segura-123'}),{DB:db})).status,200);assert.equal((await handleApi(authReq('auth/login','POST',{email:'maria@example.com',password:'errada'}),{DB:db})).status,401)});
 test('Foreign origins are rejected',async()=>{const {db}=database();assert.equal((await handleApi(req('accounts','POST',account,'alice',crypto.randomUUID(),'https://evil.test'),{DB:db})).status,403)});
@@ -23,7 +50,26 @@ test('Non-transfer records cannot reference a destination account',async()=>{con
 test('Editing and deleting preserve the persisted centavo value',async()=>{const {db}=database();const a=await seed(db);const created=await handleApi(req('transactions','POST',{title:'Café',amount:12345,type:'expense',category:'Outros',accountId:a.id,date:'2026-09-08',status:'paid'},'alice'),{DB:db});assert.equal(created.status,201);const id=(await created.json()).id;const edited=await handleApi(req('transactions/'+id,'PUT',{title:'Café grande',amount:12346,type:'expense',category:'Outros',accountId:a.id,date:'2026-09-08',status:'paid',installments:1},'alice'),{DB:db});assert.equal(edited.status,200);assert.equal((await readState(db,'alice')).transactions[0].amount,12346);assert.equal((await handleApi(req('transactions/'+id,'DELETE',undefined,'alice'),{DB:db})).status,200);assert.equal((await readState(db,'alice')).transactions.length,0)});
 test('Idempotency keys replay the original response and reject reuse',async()=>{const {db}=database();const key=crypto.randomUUID();const first=await handleApi(req('accounts','POST',account,'alice',key),{DB:db});assert.equal(first.status,201);const firstBody=await first.json();const replay=await handleApi(req('accounts','POST',account,'alice',key),{DB:db});assert.equal(replay.status,201);assert.deepEqual(await replay.json(),firstBody);assert.equal((await handleApi(req('accounts','POST',{...account,name:'Outra'},'alice',key),{DB:db})).status,409);assert.equal((await readState(db,'alice')).accounts.length,1)});
 test('Onboarding validates before writing and is atomic and replayable',async()=>{const {db}=database();const key=crypto.randomUUID();const invalid={account:{...account},goal:{name:'Reserva',target:0,saved:0,date:'2027-01-01',color:'#5376d9'}};assert.equal((await handleApi(req('onboarding','POST',invalid,'alice',key),{DB:db})).status,400);assert.equal((await readState(db,'alice')).accounts.length,0);const payload={account:{...account,name:'Conta inicial',opening:57298},income:{title:'Renda mensal',amount:250000,startMonth:'2026-09',active:false,automatic:false,businessDayRule:'previous_business_day'},goal:{name:'Reserva',target:1000000,saved:0,date:'2027-01-01',color:'#5376d9'}};const first=await handleApi(req('onboarding','POST',payload,'alice',key),{DB:db});assert.equal(first.status,201);const response=await first.json();const replay=await handleApi(req('onboarding','POST',payload,'alice',key),{DB:db});assert.equal(replay.status,201);assert.deepEqual(await replay.json(),response);const state=await readState(db,'alice');assert.equal(state.accounts.length,1);assert.equal(state.incomePlans.length,1);assert.equal(state.goals.length,1);assert.equal(state.accounts[0].opening,57298);assert.equal(state.incomePlans[0].amount,250000);assert.equal((await handleApi(req('onboarding','POST',{...payload,account:{...payload.account,name:'Outra'}},'alice',key),{DB:db})).status,409)});
-test('Credit installments are atomic, payments are not new expenses',async()=>{const {db}=database();const cash=await seed(db);const card=await seed(db,'alice',{...account,name:'Cartão',kind:'credit',opening:0});const buy={title:'Compra',amount:10000,type:'expense',category:'Compras',accountId:card.id,date:'2026-09-04',status:'pending',installments:3};assert.equal((await handleApi(req('transactions','POST',buy),{DB:db})).status,201);let s=await readState(db,'alice');assert.equal(s.transactions.length,3);assert.equal(s.transactions.reduce((n,t)=>n+t.amount,0),10000);assert.deepEqual(s.transactions.map(t=>t.date).sort(),['2026-09-12','2026-10-12','2026-11-12']);const payment={title:'Fatura',amount:3334,type:'transfer',category:'Transferência',accountId:cash.id,toId:card.id,date:'2026-10-01',invoiceMonth:'2026-09',status:'paid'};assert.equal((await handleApi(req('transactions','POST',payment),{DB:db})).status,201);s=await readState(db,'alice');assert.equal(invoiceBalance(s,card.id,'2026-09'),0);assert.equal(invoiceBalance(s,card.id,'2026-10'),3333);const b=balances(s,'2026-10-01');assert.equal(b[cash.id],96666);assert.equal(b[card.id],-6666);assert.equal(s.transactions.filter(t=>t.type==='expense').reduce((n,t)=>n+t.amount,0),10000)});
+test('Credit installments are atomic, payments are not new expenses',async()=>{const {db}=database();const cash=await seed(db);const card=await seed(db,'alice',{...account,name:'Cartão',kind:'credit',opening:0});const buy={title:'Compra',amount:10000,type:'expense',category:'Compras',accountId:card.id,date:'2026-09-04',status:'pending',installments:3};assert.equal((await handleApi(req('transactions','POST',buy),{DB:db})).status,201);let s=await readState(db,'alice');assert.equal(s.transactions.length,3);assert.equal(s.transactions.reduce((n,t)=>n+t.amount,0),10000);assert.deepEqual(s.transactions.map(t=>t.date).sort(),['2026-09-12','2026-10-12','2026-11-12']);assert.ok(s.transactions.every(t=>t.purchaseDate==='2026-09-04'&&t.cardInvoiceId));const payment={title:'Fatura',amount:3334,type:'transfer',category:'Transferência',accountId:cash.id,toId:card.id,date:'2026-10-01',invoiceMonth:'2026-09',status:'paid'};assert.equal((await handleApi(req('transactions','POST',payment),{DB:db})).status,201);s=await readState(db,'alice');assert.equal(invoiceBalance(s,card.id,'2026-09','2026-10-01'),0);assert.equal(invoiceBalance(s,card.id,'2026-10','2026-10-01'),3333);const b=balances(s,'2026-10-01');assert.equal(b[cash.id],96666);assert.equal(b[card.id],-6666);assert.equal(s.transactions.filter(t=>t.type==='expense').reduce((n,t)=>n+t.amount,0),10000)});
+test('Editing a grouped card installment changes only that occurrence',async()=>{
+  const {db}=database();
+  const card=await seed(db,'alice',{...account,name:'Cartão',kind:'credit',opening:0});
+  const buy={title:'Notebook',amount:30000,type:'expense',category:'Compras',accountId:card.id,date:'2026-09-04',status:'pending',installments:3};
+  assert.equal((await handleApi(req('transactions','POST',buy),{DB:db})).status,201);
+  let state=await readState(db,'alice');
+  const target=state.transactions.find(transaction=>transaction.installment===2);
+  const edited=await handleApi(req('transactions/'+target.id,'PUT',{title:'Notebook parcela ajustada',amount:11000,type:'expense',category:'Compras',accountId:card.id,date:target.date,status:'pending',installments:1}),{DB:db});
+  assert.equal(edited.status,200);
+  state=await readState(db,'alice');
+  const group=state.transactions.filter(transaction=>transaction.groupId===target.groupId).sort((a,b)=>a.installment-b.installment);
+  assert.equal(group.length,3);
+  assert.deepEqual(group.map(transaction=>transaction.amount),[10000,11000,10000]);
+  assert.deepEqual(group.map(transaction=>transaction.installment),[1,2,3]);
+  assert.ok(group.every(transaction=>transaction.installments===3&&transaction.purchaseDate==='2026-09-04'));
+  assert.equal(group[0].title,'Notebook');
+  assert.equal(group[1].title,'Notebook parcela ajustada');
+  assert.equal(group[2].title,'Notebook');
+});
 test('Card invoice summary keeps spending visible after payment and separates future commitments',()=>{
   const state={accounts:[],transactions:[
     {id:'aug-a',title:'Mercado',amount:12000,type:'expense',category:'Alimenta\u00e7\u00e3o',accountId:'card',date:'2026-08-12',status:'pending'},
