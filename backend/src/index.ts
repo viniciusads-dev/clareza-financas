@@ -156,6 +156,13 @@ function json(
     },
   });
 }
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new HttpError(400, "Caminho inválido.");
+  }
+}
 export async function readState(db: D1Database, owner: string): Promise<State> {
   const { results } = await db
     .prepare(
@@ -708,7 +715,8 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const path = url.pathname
       .replace(/^\/api\/?/, "")
       .split("/")
-      .filter(Boolean);
+      .filter(Boolean)
+      .map(decodePathSegment);
     if (path[0] === "auth") return await handleAuth(request, env, url, path);
     const sessionUser = env.DB ? await currentUser(env.DB, request) : null;
     const owner = sessionUser?.id;
@@ -965,7 +973,25 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
             env.DB.prepare(
               "UPDATE finance_records SET data = ? WHERE id = ? AND owner = ? AND kind = ?",
             ).bind(
-              JSON.stringify({ ...t, date: t.date, installments: 1 }),
+              JSON.stringify({
+                ...t,
+                date: t.date,
+                installments: 1,
+                ...(old.groupId ? { groupId: old.groupId } : {}),
+                ...(old.installment ? { installment: old.installment } : {}),
+                ...(old.purchaseDate
+                  ? { purchaseDate: old.purchaseDate }
+                  : {}),
+                ...(old.recurrenceId
+                  ? { recurrenceId: old.recurrenceId }
+                  : {}),
+                ...(old.incomePlanId
+                  ? { incomePlanId: old.incomePlanId }
+                  : {}),
+                ...(old.incomePeriod
+                  ? { incomePeriod: old.incomePeriod }
+                  : {}),
+              }),
               record!.id,
               owner,
               kind,
