@@ -44,6 +44,7 @@ const schemas = {
       opening: z.number().int().min(-100000000000).max(100000000000),
       color,
       limit: cents,
+      monthlyTarget: cents.optional(),
       closing: z.number().int().min(1).max(31),
       due: z.number().int().min(1).max(31),
     })

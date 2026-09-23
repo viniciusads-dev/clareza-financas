@@ -12,6 +12,7 @@ export function createEditor(real: State, month: string, kind: FormKind, record?
     opening: "0",
     color: colors[0],
     limit: "",
+    monthlyTarget: "",
     closing: "5",
     due: "12",
     type: "expense",
@@ -46,7 +47,7 @@ export function createEditor(real: State, month: string, kind: FormKind, record?
       if (value !== undefined && value !== null)
         values[key] = Array.isArray(value) ? value.join(",") : String(value);
     });
-  for (const key of ["amount", "opening", "limit", "target", "saved"])
+  for (const key of ["amount", "opening", "limit", "monthlyTarget", "target", "saved"])
     if (record && key in record)
       values[key] = ((record as unknown as Record<string, number>)[key] / 100)
         .toFixed(2)

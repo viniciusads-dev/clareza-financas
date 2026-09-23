@@ -188,3 +188,47 @@
 .auth-error-page{display:flex;min-height:100svh;align-items:center;justify-content:center;padding:24px;background:#f4f7f4;color:#1d3a2e}.auth-error-card{width:min(100%,480px);padding:34px;border:1px solid #e6d8c7;border-radius:16px;background:#fff;box-shadow:0 18px 45px #294c3810}.auth-error-kicker{display:block;margin-bottom:10px;color:#8f9f91;font-size:10px;font-weight:650;letter-spacing:1.5px}.auth-error-card h1{color:#294d39;font-size:27px;line-height:1.25;letter-spacing:-.5px}.auth-error-card p{margin:13px 0 22px;color:#77887c;font-size:14px;line-height:1.7}.auth-error-card .primary-button{min-width:160px}
 .privacy-chart-placeholder{display:flex;min-height:220px;align-items:center;justify-content:center;flex-direction:column;gap:8px;border:1px dashed #dce8dd;border-radius:12px;background:#f8fbf8;color:#7f9785;text-align:center}.privacy-chart-placeholder svg{color:#6d9a78}.privacy-chart-placeholder span{font-size:13px;font-weight:650}.privacy-chart-placeholder small{max-width:190px;color:#9aa99d;font-size:11px;line-height:1.5}.flow-chart-placeholder{min-height:190px}
 .export-note{align-self:center;color:#8c9d91;font-size:11px;line-height:1.4}
+
+.credit-container{padding:0;overflow:hidden;border-radius:14px;box-shadow:0 8px 22px #253c2e08}
+.credit-learning-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:20px 22px;background:linear-gradient(125deg,color-mix(in srgb,var(--credit-accent) 90%,#183b2b),color-mix(in srgb,var(--credit-accent) 67%,#19392a));color:#fff}
+.credit-learning-header>div:first-child{display:flex;flex-direction:column;gap:7px;min-width:0}
+.credit-learning-header>div:first-child>span{color:#ffffffbd;font-size:11px}
+.credit-learning-header>div:first-child>strong{overflow:hidden;font-size:16px;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
+.credit-learning-due{display:flex;align-items:center;gap:8px;flex:0 0 auto;color:#ffffffdf}
+.credit-learning-due small{font-size:10px;color:#ffffffc4}
+.credit-spent-primary{display:flex;flex-direction:column;gap:5px}
+.credit-spent-primary>span,.credit-target-values>span{color:#87958b;font-size:11px}
+.credit-spent-primary>strong{color:#294e38;font-size:32px;font-weight:650;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1.25}
+.credit-personal-target{margin-top:16px;padding:13px 14px;border:1px solid #e5eee5;border-radius:10px;background:#f8fbf7}
+.credit-target-values{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.credit-target-values strong{color:#506b55;font-size:12px;font-weight:650;white-space:nowrap}
+.credit-target-progress{height:8px!important;background:#e6eee5!important}
+.credit-target-progress [data-slot=progress-indicator]{background:#68a978!important}
+.credit-target-progress.over [data-slot=progress-indicator]{background:#cc8a60!important}
+.credit-personal-target>p{margin-top:8px;color:#829085;font-size:11px;line-height:1.5}
+.credit-no-target p{color:#829085;font-size:11px;line-height:1.55}
+.credit-no-target .text-button{justify-content:flex-start;margin-top:8px;padding:0;font-size:11px}
+.credit-learning-metrics{display:grid;grid-template-columns:1fr 1fr;gap:13px 15px;margin-top:18px}
+.credit-learning-metrics>div{display:flex;flex-direction:column;gap:5px;min-width:0}
+.credit-learning-metrics span{color:#8b998e;font-size:10px;line-height:1.4}
+.credit-learning-metrics strong{overflow-wrap:anywhere;color:#4a6150;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums}
+.credit-category-insight{display:flex;align-items:center;gap:4px;margin-top:15px;padding-top:13px;border-top:1px solid #eef2ed;color:#859289;font-size:10px}
+.credit-category-insight strong{overflow:hidden;color:#5c745f;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
+.credit-category-insight span{margin-left:auto;color:#526b57;font-weight:650;white-space:nowrap}
+.credit-upcoming-detail,.credit-bank-limit{margin-top:12px;padding:11px 12px;border:1px solid #edf1ec;border-radius:9px;background:#fcfdfb}
+.credit-upcoming-detail summary,.credit-bank-limit summary{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#738276;font-size:10px;cursor:pointer;list-style:none}
+.credit-upcoming-detail summary::-webkit-details-marker,.credit-bank-limit summary::-webkit-details-marker{display:none}
+.credit-upcoming-detail summary:after,.credit-bank-limit summary:after{content:'+';color:#74927a;font-size:15px;line-height:1}
+.credit-upcoming-detail[open] summary:after,.credit-bank-limit[open] summary:after{content:'−'}
+.credit-upcoming-detail>div{display:grid;gap:8px;margin-top:11px}
+.credit-upcoming-detail>div>span,.credit-bank-limit>div{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#87948a;font-size:10px}
+.credit-upcoming-detail strong,.credit-bank-limit summary strong,.credit-bank-limit>div strong{color:#5a6f5d;font-size:10px;font-weight:650;white-space:nowrap}
+.credit-bank-limit summary strong{margin-left:auto}
+.credit-bank-limit>div{margin-top:12px}
+.credit-bank-progress{height:5px!important;margin-top:9px;background:#edf1ed!important}
+.credit-bank-progress [data-slot=progress-indicator]{background:#8cad91!important}
+.credit-actions{justify-content:flex-start;gap:7px;margin-top:17px;padding-top:13px;border-top:1px solid #edf1ed}
+.credit-actions .text-button{justify-content:flex-start;font-size:11px;white-space:nowrap}
+.credit-actions .text-button:nth-child(2){margin-left:auto}
+.credit-actions .icon-button{width:29px;height:29px}
+@media(max-width:767px){.credit-learning-header{padding:18px}.credit-info{padding:18px}.credit-spent-primary>strong{font-size:29px}.credit-learning-metrics{gap:12px}.credit-actions{gap:5px}.credit-actions .text-button{font-size:10px}.credit-actions .text-button:nth-child(2){margin-left:0}}

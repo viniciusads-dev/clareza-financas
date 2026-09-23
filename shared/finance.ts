@@ -5,6 +5,7 @@ export type Account = {
     opening: number;
     color: string;
     limit: number;
+    monthlyTarget?: number;
     closing: number;
     due: number;
 };
@@ -266,6 +267,92 @@ export function monthStats(s: State, month: string) {
     return { tx, income, expense };
 }
 
+export type CreditCardInvoiceSummary = {
+    month: string;
+    spent: number;
+    paid: number;
+    outstanding: number;
+    previousSpent: number;
+    change: number;
+    futureCommitted: number;
+    upcomingInvoices: { month: string; spent: number; paid: number; outstanding: number }[];
+    topCategory?: { name: string; amount: number };
+};
+
+export function creditCardInvoiceSummary(
+    s: State,
+    accountId: string,
+    month: string,
+): CreditCardInvoiceSummary {
+    const monthly = new Map<string, {
+        spent: number;
+        paid: number;
+        categories: Map<string, number>;
+    }>();
+    const bucket = (period: string) => {
+        let result = monthly.get(period);
+        if (!result) {
+            result = { spent: 0, paid: 0, categories: new Map() };
+            monthly.set(period, result);
+        }
+        return result;
+    };
+
+    for (const transaction of s.transactions) {
+        if (
+            transaction.accountId === accountId &&
+            transaction.type === "expense"
+        ) {
+            const result = bucket(transaction.date.slice(0, 7));
+            result.spent += transaction.amount;
+            result.categories.set(
+                transaction.category,
+                (result.categories.get(transaction.category) ?? 0) + transaction.amount,
+            );
+        } else if (
+            transaction.toId === accountId &&
+            transaction.type === "transfer" &&
+            transaction.status === "paid"
+        ) {
+            const period = transaction.invoiceMonth ?? transaction.date.slice(0, 7);
+            bucket(period).paid += transaction.amount;
+        }
+    }
+
+    const totalsFor = (period: string) => {
+        const result = monthly.get(period);
+        const spent = result?.spent ?? 0;
+        const paid = result?.paid ?? 0;
+        return { month: period, spent, paid, outstanding: Math.max(0, spent - paid) };
+    };
+    const current = totalsFor(month);
+    const previousMonth = addMonths(`${month}-01`, -1).slice(0, 7);
+    const previousSpent = totalsFor(previousMonth).spent;
+    const futureMonths = [...monthly.entries()]
+        .filter(([period, totals]) => period > month && totals.spent > 0)
+        .map(([period]) => period)
+        .sort();
+    const futureCommitted = futureMonths.reduce(
+        (total, period) => total + totalsFor(period).outstanding,
+        0,
+    );
+    const upcomingInvoices = futureMonths
+        .slice(0, 3)
+        .map(totalsFor);
+    const topCategory = [...(monthly.get(month)?.categories ?? new Map())]
+        .map(([name, amount]) => ({ name, amount }))
+        .sort((a, b) => b.amount - a.amount)[0];
+
+    return {
+        ...current,
+        previousSpent,
+        change: current.spent - previousSpent,
+        futureCommitted,
+        upcomingInvoices,
+        ...(topCategory ? { topCategory } : {}),
+    };
+}
+
 export function invoiceBalance(
     s: State,
     accountId: string,
@@ -273,20 +360,20 @@ export function invoiceBalance(
 ): number {
     const purchases = s.transactions
         .filter(
-            (t) =>
-                t.accountId === accountId &&
-                t.type === "expense" &&
-                t.date.startsWith(month),
+            (transaction) =>
+                transaction.accountId === accountId &&
+                transaction.type === "expense" &&
+                transaction.date.startsWith(month),
         )
-        .reduce((n, t) => n + t.amount, 0);
+        .reduce((total, transaction) => total + transaction.amount, 0);
     const payments = s.transactions
         .filter(
-            (t) =>
-                t.toId === accountId &&
-                t.type === "transfer" &&
-                t.status === "paid" &&
-                (t.invoiceMonth ?? t.date.slice(0, 7)) === month,
+            (transaction) =>
+                transaction.toId === accountId &&
+                transaction.type === "transfer" &&
+                transaction.status === "paid" &&
+                (transaction.invoiceMonth ?? transaction.date.slice(0, 7)) === month,
         )
-        .reduce((n, t) => n + t.amount, 0);
+        .reduce((total, transaction) => total + transaction.amount, 0);
     return Math.max(0, purchases - payments);
 }

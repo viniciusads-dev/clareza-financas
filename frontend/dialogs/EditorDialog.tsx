@@ -62,6 +62,9 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
           opening: money(values.opening || "0"),
           color: values.color,
           limit: money(values.limit || "0"),
+          ...(values.kind === "credit"
+            ? { monthlyTarget: money(values.monthlyTarget || "0") }
+            : {}),
           closing: Number(values.closing),
           due: Number(values.due),
         };
@@ -712,6 +715,20 @@ export default function EditorDialog({ initial, state, refresh, onClose, onSaved
                         field("limit", event.target.value)
                       }
                     />
+                  </label>
+                  <label className="field">
+                    <span>Meta pessoal mensal (R$)</span>
+                    <input
+                      inputMode="decimal"
+                      value={editor.values.monthlyTarget}
+                      onChange={(event) =>
+                        field("monthlyTarget", event.target.value)
+                      }
+                      placeholder="Opcional"
+                    />
+                    <small>
+                      Escolha quanto deseja gastar por mês. Essa meta não altera o limite do banco.
+                    </small>
                   </label>
                   <div className="form-grid">
                     <label className="field">
